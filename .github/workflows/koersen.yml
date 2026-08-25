@@ -37,4 +37,5 @@ jobs:
           git config user.name "Koersenrobot"
           git config user.email "actions@github.com"
           git commit -m "Koersen bijgewerkt $(date -u +%Y-%m-%d)"
+          git pull --rebase --autostash
           git push
