@@ -1,0 +1,40 @@
+name: Koersen bijwerken
+
+on:
+  schedule:
+    - cron: "20 5 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: koersen
+  cancel-in-progress: false
+
+jobs:
+  koersen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Project ophalen
+        uses: actions/checkout@v4
+
+      - name: Python klaarzetten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Koersen ophalen
+        run: python koersen_ophalen.py
+
+      - name: Resultaat opslaan
+        run: |
+          if git diff --quiet -- koersen.json; then
+            echo "Geen nieuwe koersen; niets om op te slaan."
+            exit 0
+          fi
+          git config user.name "Koersenrobot"
+          git config user.email "actions@github.com"
+          git add koersen.json
+          git commit -m "Koersen bijgewerkt $(date -u +%Y-%m-%d)"
+          git push
