@@ -1,0 +1,31 @@
+{
+  "vanaf": "2024-01-01",
+  "_uitleg": "Per fonds: de ISIN uit je DeGiro-export en het symbool waaronder Yahoo Finance het fonds kent. Controleer het symbool door het te zoeken op finance.yahoo.com en de koers te vergelijken met je DeGiro-overzicht.",
+  "fondsen": [
+    {
+      "isin": "IE00B3XXRP09",
+      "naam": "Vanguard S&P 500 UCITS ETF (Amsterdam)",
+      "ticker": "VUSA.AS"
+    },
+    {
+      "isin": "IE00BM67HT60",
+      "naam": "Xtrackers MSCI World Information Technology (Xetra)",
+      "ticker": "XDWT.DE"
+    },
+    {
+      "isin": "NL0012969182",
+      "naam": "Adyen N.V. (Amsterdam)",
+      "ticker": "ADYEN.AS"
+    },
+    {
+      "isin": "US0378331005",
+      "naam": "Apple Inc. (Nasdaq, noteert in dollar)",
+      "ticker": "AAPL"
+    },
+    {
+      "isin": "IE00B53L3W79",
+      "naam": "iShares Core EURO STOXX 50 (Amsterdam, verkocht)",
+      "ticker": "CSX5.AS"
+    }
+  ]
+}
