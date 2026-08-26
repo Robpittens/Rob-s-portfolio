@@ -109,6 +109,33 @@
   .tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;
     border:1px solid var(--line2);color:var(--muted);border-radius:4px;padding:1px 5px;margin-left:6px}
   .tag.exact{border-color:rgba(95,211,166,.5);color:var(--good)}
+  /* ---------- effectenlijst ---------- */
+  .fund{display:grid;grid-template-columns:34px 1fr auto;gap:11px;align-items:center;
+    padding:11px 8px;border-bottom:1px solid rgba(28,76,94,.5);cursor:pointer;
+    border-radius:8px;transition:background .12s;width:100%;background:none;border-left:0;
+    border-right:0;border-top:0;text-align:left;font-family:var(--sans);color:var(--ink)}
+  .fund:hover{background:rgba(58,200,193,.07)}
+  .fund:last-of-type{border-bottom:none}
+  .badge{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    font-family:var(--mono);font-size:13px;font-weight:600;color:#07202B}
+  .fund .nm2{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+  .fund .sub2{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:3px}
+  .fund .rt{text-align:right;font-family:var(--mono);font-size:13px;white-space:nowrap}
+  .fund .rt small{display:block;font-size:11px;margin-top:3px}
+  .wbar{height:3px;border-radius:2px;background:rgba(28,76,94,.8);margin-top:6px;overflow:hidden}
+  .wbar i{display:block;height:100%;background:var(--water)}
+  .backbtn{background:none;border:0;color:var(--water);font-size:12.5px;padding:0 0 8px;cursor:pointer}
+  .backbtn:hover{text-decoration:underline}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-size:13px;margin-top:2px}
+  .kv div{padding:6px 0;border-bottom:1px solid rgba(28,76,94,.4)}
+  .kv div:nth-child(even){text-align:right;font-family:var(--mono);font-size:12.5px}
+  .legend2{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;margin-top:12px}
+  @media(max-width:560px){.legend2{grid-template-columns:1fr}}
+  .li{display:grid;grid-template-columns:9px 1fr auto;gap:8px;align-items:center;font-size:12.5px;padding:4px 0}
+  .li span:first-child{width:9px;height:9px;border-radius:2px}
+  .li b{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--muted)}
+  .donutwrap{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+
   .tag.est{border-color:rgba(240,194,103,.45);color:var(--sand)}
   .tag.trail{border-color:rgba(135,176,188,.5);color:var(--muted)}
 
@@ -218,9 +245,24 @@
   <div class="grid2">
     <div>
       <div class="card">
-        <h3>Posities op <span id="posDate"></span></h3>
-        <div class="sub">Waardering tegen de koers die op die dag bekend is.</div>
+        <div id="posHead"></div>
         <div id="posTable"></div>
+      </div>
+      <div class="card">
+        <h3>Verdeling op <span id="allocDate"></span></h3>
+        <div class="sub">Naar welke kant van de markt je geld leunt.</div>
+        <div class="ranges" id="allocTabs"></div>
+        <div id="allocBody"></div>
+      </div>
+      <div class="card">
+        <h3>Metingen</h3>
+        <div class="sub">Feiten over je portefeuille. De conclusies zijn aan jou.</div>
+        <div id="metrics"></div>
+      </div>
+      <div class="card">
+        <h3>Dividend</h3>
+        <div class="sub">Ontvangen uitkeringen, netto na bronbelasting.</div>
+        <div id="divBody"></div>
       </div>
       <div class="card">
         <h3>Kasstromen</h3>
@@ -393,6 +435,7 @@ function ingestTx(rows,hr){
         iIsin=C.idx(/isin/),
         iQty =C.idx(/^aantal/,/^quantity/,/^number/),
         iPr  =C.idx(/^koers/,/^price/),
+        iBeurs=C.idx(/^beurs/,/^exchange/,/uitvoeringsplaats/,/venue/),
         iLoc =C.idx(/lokale waarde/,/local value/),
         iVal =C.idx(/^waarde eur/,/^value.*eur/,/^waarde$/,/^value$/,/^waarde/,/^value/),
         iFx  =C.idx(/wisselkoers/,/exchange rate/),
@@ -419,14 +462,19 @@ function ingestTx(rows,hr){
     else if(pr.amt!=null) priceEur=fx?pr.amt/fx:pr.amt;
     if(priceEur==null||!isFinite(priceEur)) continue;
     out.push({
-      date:date, time:iTime>-1?String(row[iTime]||""):"", isin:isin,
+      date:date, time:iTime>-1?String(row[iTime]||""):"", isin:isin, ord:out.length,
       name:String(row[iProd]==null?"":row[iProd]).trim()||isin,
+      beurs:iBeurs>-1?String(row[iBeurs]==null?"":row[iBeurs]).trim().toUpperCase():"",
       qty:qty, priceLocal:pr.amt, currency:pr.cur||val.cur||"EUR",
       priceEur:priceEur, eurValue:eurValue!=null?eurValue:-priceEur*qty,
       fee:fee, total:iTot>-1?parseNum(row[iTot]):null
     });
   }
-  out.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:(a.time<b.time?-1:1));
+  const newestFirst=out.length>1 && out[0].date>out[out.length-1].date;
+  const dir=newestFirst?-1:1;
+  out.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1
+                 : a.time<b.time?-1 : a.time>b.time?1
+                 : (a.ord-b.ord)*dir);
   return out;
 }
 
@@ -448,6 +496,7 @@ function classify(desc){
 function ingestAcc(rows,hr){
   const header=rows[hr]||[], C=colFinder(header);
   const iDate=C.idx(/^datum/,/^date/),
+        iTime=C.idx(/^tijd/,/^time/),
         iProd=C.idx(/^product/),
         iIsin=C.idx(/isin/),
         iDesc=C.idx(/omschrijving/,/description/),
@@ -469,13 +518,21 @@ function ingestAcc(rows,hr){
     else sal=amountAt(row,iSal);
     const desc=String(row[iDesc]==null?"":row[iDesc]).trim();
     if(!desc && mut.amt==null && sal.amt==null) continue;
-    out.push({date:date, desc:desc, cat:classify(desc),
+    out.push({date:date, time:iTime>-1?String(row[iTime]||"").trim():"", ord:out.length,
+      desc:desc, cat:classify(desc),
       product:String(row[iProd]==null?"":row[iProd]).trim(),
       isin:String(row[iIsin]==null?"":row[iIsin]).trim().toUpperCase(),
       fx:iFx>-1?parseNum(row[iFx]):null,
       mutCur:mut.cur||"EUR", mut:mut.amt, salCur:sal.cur, sal:sal.amt});
   }
-  out.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  // DeGiro zet de nieuwste regel bovenaan. Binnen hetzelfde tijdstip is de
+  // bestandsvolgorde dan óók omgekeerd, dus die draaien we mee terug —
+  // anders wordt het eindsaldo van een dag de eerste boeking van die dag.
+  const newestFirst=out.length>1 && out[0].date>out[out.length-1].date;
+  const dir=newestFirst?-1:1;
+  out.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1
+                 : a.time<b.time?-1 : a.time>b.time?1
+                 : (a.ord-b.ord)*dir);
   return out;
 }
 
@@ -513,8 +570,17 @@ function curve(anchors,days){
 }
 
 /* ===================== timeline ===================== */
+// Rijen kunnen uit meerdere bestanden of uit een oud opgeslagen bestand komen,
+// waar de volgorde niet te vertrouwen is. Daarom sorteren we hier zelf, en
+// vertrouwen we nergens op de volgorde waarin de rijen binnenkwamen.
+function cmpAcc(a,b){
+  if(a.date!==b.date) return a.date<b.date?-1:1;
+  const ta=a.time||"", tb=b.time||"";
+  if(ta!==tb) return ta<tb?-1:1;
+  return (b.ord||0)-(a.ord||0);   // DeGiro zet de nieuwste regel bovenaan
+}
 function buildTimeline(state){
-  const txs=state.txs||[], acc=state.acc||[], fx=state.fx||1;
+  const txs=state.txs||[], acc=(state.acc||[]).slice().sort(cmpAcc), fx=state.fx||1;
   const dates=[]; txs.forEach(t=>dates.push(t.date)); acc.forEach(a=>dates.push(a.date));
   if(!dates.length) return null;
   dates.sort();
@@ -536,7 +602,11 @@ function buildTimeline(state){
   acc.forEach(a=>{ if(!accByDay.has(a.date)) accByDay.set(a.date,[]); accByDay.get(a.date).push(a); });
 
   const hold={}; isins.forEach(is=>hold[is]={qty:0,cost:0,realized:0,fees:0,name:is});
-  txs.forEach(t=>{ hold[t.isin].name=t.name; });
+  // Per fonds bijhouden wat je eraan verdiend en betaald hebt.
+  const perIsin={}; isins.forEach(is=>perIsin[is]={div:0,tax:0,costs:0,invested:0,beurs:"",currency:"EUR"});
+  txs.forEach(t=>{ hold[t.isin].name=t.name;
+    if(t.beurs) perIsin[t.isin].beurs=t.beurs;
+    if(t.currency) perIsin[t.isin].currency=t.currency; });
 
   const bal={}; // last known balance per currency
   let netDep=0, div=0, tax=0, fees=0, rente=0, other=0, tradeFees=0;
@@ -557,9 +627,16 @@ function buildTimeline(state){
       if(!hasAcc) netDep+=Math.abs(t.eurValue)*(t.qty>0?1:-1)+Math.abs(t.fee||0);
     });
     (accByDay.get(d)||[]).forEach(a=>{
-      if(a.salCur&&a.sal!=null) bal[a.salCur]=a.sal;
+      // Een "Cash Sweep Transfer" toont het saldo van je flatex-geldrekening,
+      // niet je DeGiro-cash. Die regel mag het saldo dus niet bepalen.
+      if(a.salCur&&a.sal!=null&&!/cash sweep/.test(norm(a.desc))) bal[a.salCur]=a.sal;
       const eur=a.mut==null?0:(a.mutCur==="EUR"?a.mut:(a.fx?a.mut/a.fx:a.mut/fx));
       catTot[a.cat]=(catTot[a.cat]||0)+eur;
+      if(a.isin&&perIsin[a.isin]){
+        if(a.cat==="Dividend") perIsin[a.isin].div+=eur;
+        else if(a.cat==="Dividendbelasting") perIsin[a.isin].tax+=eur;
+        else if(a.cat==="Kosten") perIsin[a.isin].costs+=eur;
+      }
       if(a.cat==="Storting/Opname") netDep+=eur;
       else if(a.cat==="Dividend") div+=eur;
       else if(a.cat==="Dividendbelasting") tax+=eur;
@@ -575,7 +652,9 @@ function buildTimeline(state){
       const p=curves[is].p[i], ex=curves[is].exact[i], tr=curves[is].trail[i];
       const v=h.qty*p; inv+=v; if(ex) exactVal+=v; else if(tr) trailVal+=v;
       pos.push({isin:is,name:h.name,qty:h.qty,price:p,exact:!!ex,trail:!!tr,value:v,
-                avg:h.qty>0?h.cost/h.qty:0,cost:h.cost});
+                avg:h.qty>0?h.cost/h.qty:0,cost:h.cost,
+                div:perIsin[is].div,tax:perIsin[is].tax,realized:h.realized,
+                fees:h.fees,beurs:perIsin[is].beurs,currency:perIsin[is].currency});
     }
     let cash=0; for(const c in bal) cash+=(c==="EUR")?bal[c]:bal[c]*fx;
     rowsOut.push({date:d, inv:inv, cash:cash, total:inv+cash, netDep:netDep,
@@ -586,7 +665,8 @@ function buildTimeline(state){
       tradeFees:tradeFees});
   }
   return {days:days, rows:rowsOut, index:index, isins:isins, anchors:ancMap,
-          anchorDays:anchorDays, curves:curves, hasAcc:hasAcc};
+          anchorDays:anchorDays, curves:curves, hasAcc:hasAcc,
+          perIsin:perIsin, hold:hold, names:Object.fromEntries(isins.map(is=>[is,hold[is].name]))};
 }
 
 function xirr(flows,guess){
@@ -604,7 +684,7 @@ function xirr(flows,guess){
 //ENGINE>>
 
 /* ===================== state + rendering ===================== */
-var state={txs:[],acc:[],marks:{},fx:1.16,files:[]};
+var state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds"};
 var TL=null, sel=null, range="all", pinned=null;
 
 const fmtEur=(v,dec)=>v==null||!isFinite(v)?"—":
@@ -642,7 +722,8 @@ async function handleFiles(list){
           if(!r.funds) throw new Error("geen enkel fonds uit dit bestand zit in jouw portefeuille");
           autoStatus(r.funds+" fondsen bijgewerkt uit "+f.name+" · "+r.pts.toLocaleString("nl-NL")+" koersen");
         } else {
-          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[]},o);
+          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds"},o);
+          state.focus=null; state.meta=state.meta||{};
         }
         continue;
       }
@@ -662,7 +743,7 @@ async function handleFiles(list){
           state.files.push({name:f.name,kind:"Transacties",n:t.length}); found++;
         } else if(det.kind==="acc"){
           const a=ingestAcc(rows,det.hr); if(!a.length) continue;
-          state.acc=mergeBy(state.acc,a,x=>x.date+"|"+x.desc+"|"+x.mut+"|"+x.sal+"|"+x.isin);
+          state.acc=mergeAcc(state.acc,a);
           state.files.push({name:f.name,kind:"Rekeningoverzicht",n:a.length}); found++;
         }
       }
@@ -674,6 +755,33 @@ async function handleFiles(list){
 }
 // Identical rows can legitimately repeat (two equal sweeps on one day), so we
 // compare how often a row occurs instead of whether it occurs.
+// Rekeningregels apart samenvoegen. Dezelfde boeking kan twee keer binnenkomen:
+// één keer uit een eerder opgeslagen bestand (soms zonder tijdstip) en één keer
+// uit een verse export. Dan houden we de versie met tijdstip, want alleen daarmee
+// kunnen we het eindsaldo van een dag betrouwbaar bepalen.
+function accKey(x){ return x.date+"|"+x.desc+"|"+x.mut+"|"+x.mutCur+"|"+x.sal+"|"+x.salCur+"|"+x.isin; }
+function mergeAcc(a,b){
+  const groups=new Map();
+  const put=(x,side)=>{
+    const k=accKey(x);
+    if(!groups.has(k)) groups.set(k,{a:[],b:[]});
+    groups.get(k)[side].push(x);
+  };
+  a.forEach(x=>put(x,"a")); b.forEach(x=>put(x,"b"));
+  const out=[];
+  groups.forEach(g=>{
+    const timed=arr=>arr.some(x=>x.time);
+    let pick;
+    if(g.a.length&&g.b.length){
+      if(timed(g.b)&&!timed(g.a)) pick=g.b;
+      else if(timed(g.a)&&!timed(g.b)) pick=g.a;
+      else pick=g.a.length>=g.b.length?g.a:g.b;
+    } else pick=g.a.length?g.a:g.b;
+    pick.forEach(x=>out.push(x));
+  });
+  return out.sort(cmpAcc);
+}
+
 function mergeBy(a,b,key){
   const have={}; a.forEach(x=>{const k=key(x); have[k]=(have[k]||0)+1;});
   const inc={}, out=a.slice();
@@ -734,28 +842,89 @@ function renderAll(){
     {k:"Per jaar (IRR)",v:irr==null?"—":fmtPct(irr),c:irr==null?"":(irr>=0?"up":"down")}
   ];
   $("kpis").innerHTML=k.map(x=>'<div class="kpi"><div class="k">'+x.k+'</div><div class="v '+x.c+'">'+x.v+"</div></div>").join("");
-  $("posDate").textContent=fmtDate(sel);
-  renderPos(r); renderCash(r); drawChart();
+  renderPos(r); renderAlloc(r); renderMetrics(r); renderDiv(); renderCash(r); drawChart();
+}
+
+const PAL=["#3AC8C1","#F0C267","#7FA3B0","#EE7B5F","#5FD3A6","#B48EEA","#6FA8DC","#E0A3C4","#9BD16B","#4E9FD1"];
+function colorFor(k,i){ return PAL[i%PAL.length]; }
+function initials(name){
+  const w=String(name).replace(/[^A-Za-z0-9 ]/g," ").trim().split(/\s+/);
+  return ((w[0]||"?")[0]+((w[1]||"")[0]||"")).toUpperCase();
 }
 
 function renderPos(r){
+  if(state.focus){ renderDetail(r); return; }
+  $("posHead").innerHTML='<h3>Effecten op '+fmtDate(sel)+"</h3>"+
+    '<div class="sub">Tik op een effect voor de details en het verloop.</div>';
   if(!r.pos.length){ $("posTable").innerHTML='<p class="hint">Op deze datum stond er nog niets in de portefeuille.</p>'; return; }
   const pos=r.pos.slice().sort((a,b)=>b.value-a.value);
-  let h='<table><thead><tr><th>Fonds</th><th>Aantal</th><th>Koers</th><th>GAK</th><th>Waarde</th><th>Res.</th><th>Deel</th></tr></thead><tbody>';
-  pos.forEach(p=>{
-    const res=p.value-p.cost;
-    h+='<tr><td><span class="nm">'+esc(p.name)+'</span><span class="isin">'+p.isin+'</span></td>'+
-       "<td>"+fmtNum(p.qty,p.qty%1?4:0)+"</td>"+
-       "<td>"+fmtNum(p.price)+'<span class="tag '+(p.exact?"exact":p.trail?"trail":"est")+'">'+
-       (p.exact?"koers":p.trail?"laatste":"schat")+"</span></td>"+
-       "<td>"+fmtNum(p.avg)+"</td><td>"+fmtEur(p.value)+"</td>"+
-       '<td class="'+(res>=0?"up":"down")+'">'+fmtEur(res,0)+"</td>"+
-       "<td>"+fmtNum(r.inv?p.value/r.inv*100:0,1)+"%</td></tr>";
+  let h="";
+  pos.forEach((p,i)=>{
+    const res=p.value-p.cost, pct=p.cost>0?res/p.cost:null, w=r.inv?p.value/r.inv*100:0;
+    h+='<button class="fund" data-isin="'+p.isin+'">'+
+       '<span class="badge" style="background:'+colorFor(p.isin,i)+'">'+initials(p.name)+"</span>"+
+       '<span><span class="nm2">'+esc(p.name)+"</span>"+
+       '<span class="sub2">'+fmtNum(p.qty,p.qty%1?4:0)+" × "+fmtNum(p.price)+
+       (p.beurs?" · "+esc(p.beurs):"")+"</span>"+
+       '<span class="wbar"><i style="width:'+w.toFixed(1)+'%;background:'+colorFor(p.isin,i)+'"></i></span></span>'+
+       '<span class="rt">'+fmtEur(p.value)+
+       '<small class="'+(res>=0?"up":"down")+'">'+(res>=0?"+":"")+fmtEur(res,0)+
+       (pct==null?"":" · "+fmtPct(pct))+"</small>"+
+       '<small style="color:var(--dim)">'+fmtNum(w,1)+"%</small></span></button>";
   });
-  h+="</tbody><tfoot><tr><td>"+pos.length+" posities</td><td></td><td></td><td></td><td>"+fmtEur(r.inv)+
-     '</td><td class="'+(r.inv-pos.reduce((s,p)=>s+p.cost,0)>=0?"up":"down")+'">'+
-     fmtEur(r.inv-pos.reduce((s,p)=>s+p.cost,0),0)+"</td><td>100%</td></tr></tfoot></table>";
+  h+='<div style="display:flex;justify-content:space-between;padding:12px 8px 0;font-family:var(--mono);font-size:13px;border-top:1px solid var(--line2);margin-top:4px">'+
+     "<span>"+pos.length+" effecten</span><span>"+fmtEur(r.inv)+"</span></div>";
   $("posTable").innerHTML=h;
+}
+
+function renderDetail(r){
+  const isin=state.focus;
+  const p=r.pos.find(x=>x.isin===isin);
+  const name=TL.names[isin]||isin;
+  const led=TL.perIsin[isin]||{};
+  const h=TL.hold[isin]||{};
+  $("posHead").innerHTML='<button class="backbtn" id="back">← alle effecten</button>'+
+    "<h3>"+esc(name)+'</h3><div class="sub"><span class="isin">'+isin+"</span>"+
+    (led.beurs?" · "+esc(led.beurs):"")+(led.currency&&led.currency!=="EUR"?" · noteert in "+led.currency:"")+"</div>";
+  const txl=state.txs.filter(t=>t.isin===isin);
+  const ingelegd=txl.reduce((s,t)=>s+(t.qty>0?Math.abs(t.eurValue)+Math.abs(t.fee||0):0),0);
+  const opgehaald=txl.reduce((s,t)=>s+(t.qty<0?Math.abs(t.eurValue)-Math.abs(t.fee||0):0),0);
+  const netDiv=(led.div||0)+(led.tax||0);
+  const value=p?p.value:0, cost=p?p.cost:0;
+  const totaal=value-cost+(h.realized||0)+netDiv;
+  const rows=[
+    ["In bezit op "+fmtDate(sel), p?fmtNum(p.qty,p.qty%1?4:0)+" stuks":"niets"],
+    ["Waarde", fmtEur(value)],
+    ["Gemiddelde aankoopkoers", p?fmtNum(p.avg):"—"],
+    ["Koers op deze dag", p?fmtNum(p.price)+(p.exact?"":p.trail?" (laatste bekende)":" (geschat)"):"—"],
+    ["Ongerealiseerd resultaat", fmtEur(value-cost)],
+    ["Gerealiseerd op verkopen", fmtEur(h.realized||0)],
+    ["Dividend ontvangen", fmtEur(led.div||0)],
+    ["Dividendbelasting", fmtEur(led.tax||0)],
+    ["Transactiekosten", fmtEur(-(h.fees||0))],
+    ["Totaal ingelegd (aankopen incl. kosten)", fmtEur(ingelegd)],
+    ["Ontvangen uit verkopen", fmtEur(opgehaald)],
+    ["Resultaat op dit effect", fmtEur(totaal)]
+  ];
+  let body='<div class="kv">'+rows.map(x=>"<div>"+x[0]+"</div><div>"+x[1]+"</div>").join("")+"</div>";
+  body+='<h3 style="margin:18px 0 2px;font-size:14px">Transacties</h3>'+
+    '<table><thead><tr><th>Datum</th><th>Aantal</th><th>Koers</th><th>Kosten</th><th>Totaal</th></tr></thead><tbody>'+
+    txl.slice().reverse().map(t=>"<tr><td>"+fmtDate(t.date)+"</td><td>"+fmtNum(t.qty,t.qty%1?4:0)+
+      "</td><td>"+fmtNum(t.priceEur)+"</td><td>"+fmtNum(Math.abs(t.fee||0))+"</td><td>"+
+      fmtEur(t.total!=null?t.total:-t.eurValue)+"</td></tr>").join("")+"</tbody></table>";
+  const divl=state.acc.filter(a=>a.isin===isin&&(a.cat==="Dividend"||a.cat==="Dividendbelasting"));
+  if(divl.length){
+    body+='<h3 style="margin:18px 0 2px;font-size:14px">Dividenden</h3>'+
+      '<table><thead><tr><th>Datum</th><th>Soort</th><th>Bedrag</th></tr></thead><tbody>'+
+      divl.slice().reverse().map(a=>{const eur=a.mutCur==="EUR"?a.mut:(a.fx?a.mut/a.fx:a.mut/state.fx);
+        return "<tr><td>"+fmtDate(a.date)+"</td><td>"+(a.cat==="Dividend"?"uitkering":"bronbelasting")+
+        '</td><td class="'+(eur>=0?"up":"down")+'">'+fmtEur(eur)+
+        (a.mutCur!=="EUR"?' <span class="isin">('+fmtNum(a.mut)+" "+a.mutCur+")</span>":"")+"</td></tr>";}).join("")+
+      "</tbody></table>";
+  }
+  body+='<p class="hint">De grafiek hierboven toont nu alleen dit effect: de waarde tegenover wat je erin gestopt hebt.</p>';
+  $("posTable").innerHTML=body;
+  $("back").addEventListener("click",()=>{ state.focus=null; renderAll(); });
 }
 
 function renderCash(r){
@@ -868,6 +1037,9 @@ function applyPriceFile(o){
       const day=parseDate(d), p=parseNum(k[d]);
       if(day&&p!=null&&p>0){ add.push({date:day,price:p,src:"auto"}); pts++; }
     }
+    state.meta[isin]=Object.assign({},state.meta[isin],
+      {naam:f.naam,sector:f.sector,land:f.land,ticker:f.ticker,
+       sectorweging:f.sectorweging,holdings:f.holdings});
     if(!add.length) continue;
     funds++;
     const seen=new Set(add.map(m=>m.date));
@@ -908,6 +1080,186 @@ $("autoGo").addEventListener("click",()=>{
 });
 $("autoUrl").addEventListener("keydown",e=>{ if(e.key==="Enter") $("autoGo").click(); });
 
+/* ---------- verdeling ---------- */
+const ALLOC=[["fonds","Fonds"],["beurs","Beurs"],["valuta","Valuta"],["sector","Sector"],["land","Land"]];
+function allocGroups(r,tab){
+  const g=new Map();
+  const add=(k,v)=>g.set(k,(g.get(k)||0)+v);
+  r.pos.forEach(p=>{
+    const m=state.meta[p.isin]||{};
+    if(tab==="fonds") return add(p.name,p.value);
+    if(tab==="beurs") return add(p.beurs||"onbekend",p.value);
+    if(tab==="valuta") return add(p.currency||"EUR",p.value);
+    if(tab==="sector"&&m.sectorweging){
+      // Doorkijk: het geld in dit fonds verdelen over de sectoren die het aanhoudt.
+      let som=0;
+      for(const s in m.sectorweging) som+=m.sectorweging[s];
+      if(som>0){ for(const s in m.sectorweging) add(s,p.value*m.sectorweging[s]/som); return; }
+    }
+    const k=m[tab];
+    if(k) add(k,p.value);
+  });
+  return [...g.entries()].map(e=>({k:e[0],v:e[1]})).sort((a,b)=>b.v-a.v);
+}
+function renderAlloc(r){
+  $("allocDate").textContent=fmtDate(sel);
+  $("allocTabs").innerHTML=ALLOC.map(t=>
+    '<button data-t="'+t[0]+'" aria-pressed="'+(state.allocTab===t[0])+'">'+t[1]+"</button>").join("");
+  const g=allocGroups(r,state.allocTab), tot=g.reduce((s,x)=>s+x.v,0);
+  if(!g.length||tot<=0){
+    const extra=(state.allocTab==="sector"||state.allocTab==="land");
+    $("allocBody").innerHTML='<p class="hint">'+(extra?
+      "Sector en land staan niet in je DeGiro-export. Vul ze per fonds in <b>fondsen.json</b> op GitHub — een regel <code>\"sector\": \"Technologie\"</code> en <code>\"land\": \"Wereldwijd\"</code> — dan verschijnt deze verdeling automatisch.":
+      "Nog niets te verdelen op deze datum.")+"</p>";
+    return;
+  }
+  const R=62, r0=40, C=72, TAU=Math.PI*2;
+  let a0=-Math.PI/2, arcs="";
+  g.forEach((x,i)=>{
+    const frac=x.v/tot, a1=a0+frac*TAU, big=frac>0.5?1:0;
+    const pt=(rad,ang)=>[(C+rad*Math.cos(ang)).toFixed(2),(C+rad*Math.sin(ang)).toFixed(2)];
+    if(frac>0.9999){
+      arcs+='<circle cx="'+C+'" cy="'+C+'" r="'+((R+r0)/2)+'" fill="none" stroke="'+colorFor(x.k,i)+
+            '" stroke-width="'+(R-r0)+'"/>';
+    } else {
+      const p1=pt(R,a0),p2=pt(R,a1),p3=pt(r0,a1),p4=pt(r0,a0);
+      arcs+='<path d="M'+p1+' A'+R+' '+R+' 0 '+big+' 1 '+p2+' L'+p3+' A'+r0+' '+r0+' 0 '+big+' 0 '+p4+
+            ' Z" fill="'+colorFor(x.k,i)+'" opacity=".9"/>';
+    }
+    a0=a1;
+  });
+  $("allocBody").innerHTML='<div class="donutwrap"><svg viewBox="0 0 144 144" width="150" height="150">'+arcs+
+    '<text x="72" y="68" text-anchor="middle" fill="#87B0BC" font-size="9" font-family="ui-monospace,monospace">'+
+    g.length+" groepen</text>"+
+    '<text x="72" y="82" text-anchor="middle" fill="#EAF4F5" font-size="12" font-family="ui-monospace,monospace">'+
+    fmtEur(tot,0)+"</text></svg>"+
+    '<div style="flex:1;min-width:230px"><div class="legend2">'+
+    g.map((x,i)=>'<div class="li"><span style="background:'+colorFor(x.k,i)+'"></span>'+
+      "<span>"+esc(x.k)+"</span><b>"+fmtNum(x.v/tot*100,1)+"%</b></div>").join("")+
+    "</div></div></div>";
+}
+$("allocTabs").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  state.allocTab=b.dataset.t; renderAlloc(rowAt(sel));
+});
+
+/* ---------- metingen ---------- */
+function renderMetrics(r){
+  if(!r.pos.length){ $("metrics").innerHTML='<p class="hint">Nog geen posities om te meten.</p>'; return; }
+  const pos=r.pos.slice().sort((a,b)=>b.value-a.value);
+  const w=pos.map(p=>p.value/r.inv);
+  const hhi=w.reduce((s,x)=>s+x*x,0);
+  const eff=1/hhi;
+  const top3=w.slice(0,3).reduce((s,x)=>s+x,0);
+  let h='<div class="kv">'+
+    "<div>Grootste positie</div><div>"+fmtNum(w[0]*100,1)+"% ("+esc(pos[0].name.slice(0,26))+")</div>"+
+    "<div>Top 3 samen</div><div>"+fmtNum(top3*100,1)+"%</div>"+
+    "<div>Effectief aantal posities</div><div>"+fmtNum(eff,1)+" van "+pos.length+"</div>"+
+    "</div>"+
+    '<p class="hint">Effectief aantal posities telt gewicht mee: vijf posities waarvan één de helft is, gedragen zich als ruim drie.</p>';
+
+  // Rendementbijdrage: wat elk fonds aan je resultaat heeft toegevoegd.
+  const contrib=TL.isins.map(is=>{
+    const p=r.pos.find(x=>x.isin===is), led=TL.perIsin[is]||{}, hd=TL.hold[is]||{};
+    const unreal=p?p.value-p.cost:0;
+    return {isin:is,name:TL.names[is]||is,
+            v:unreal+(hd.realized||0)+(led.div||0)+(led.tax||0)};
+  }).filter(x=>Math.abs(x.v)>0.005).sort((a,b)=>b.v-a.v);
+  const tot=contrib.reduce((s,x)=>s+x.v,0);
+  const mx=Math.max(...contrib.map(x=>Math.abs(x.v)),1);
+  h+='<h3 style="margin:18px 0 4px;font-size:13px">Waar je resultaat vandaan komt</h3>';
+  h+=contrib.map((x,i)=>'<div style="display:grid;grid-template-columns:1fr 90px 62px;gap:9px;align-items:center;font-size:12.5px;padding:4px 0">'+
+     '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(x.name)+"</span>"+
+     '<span class="wbar" style="height:8px"><i style="width:'+(Math.abs(x.v)/mx*100).toFixed(1)+
+     '%;background:'+(x.v>=0?"var(--good)":"var(--warm)")+'"></i></span>'+
+     '<span style="text-align:right;font-family:var(--mono);font-size:12px" class="'+(x.v>=0?"up":"down")+'">'+
+     fmtEur(x.v,0)+"</span></div>").join("");
+  h+='<p class="hint">Koerswinst plus gerealiseerd resultaat plus netto dividend, per fonds. Samen '+fmtEur(tot,0)+".</p>";
+
+  // Doorkijk naar bedrijven, als de robot holdings heeft kunnen ophalen.
+  const look={}; let covered=0, lookVal=0;
+  pos.forEach(p=>{
+    const m=state.meta[p.isin]||{}, hs=m.holdings;
+    if(hs&&hs.length){
+      lookVal+=p.value;
+      hs.forEach(x=>{ const n=x.naam||x.symbool; if(!n||!x.gewicht) return;
+        look[n]=(look[n]||0)+p.value*x.gewicht; covered+=p.value*x.gewicht; });
+    } else {
+      // los aandeel: dat is zijn eigen holding
+      if(/etf|ucits|index|fund/i.test(p.name)) return;
+      look[p.name]=(look[p.name]||0)+p.value; covered+=p.value; lookVal+=p.value;
+    }
+  });
+  const lk=Object.entries(look).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  if(lk.length){
+    h+='<h3 style="margin:18px 0 4px;font-size:13px">Doorkijk: grootste bedrijven</h3>';
+    h+=lk.map(([n,v])=>'<div style="display:grid;grid-template-columns:1fr 76px 62px;gap:9px;align-items:center;font-size:12.5px;padding:4px 0">'+
+      '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(n)+"</span>"+
+      '<span class="wbar" style="height:8px"><i style="width:'+(v/lk[0][1]*100).toFixed(1)+'%"></i></span>'+
+      '<span style="text-align:right;font-family:var(--mono);font-size:12px">'+fmtEur(v,0)+"</span></div>").join("");
+    h+='<p class="hint">Berekend uit de tien grootste posities per ETF, dus dit dekt '+
+      fmtNum(r.inv?covered/r.inv*100:0,0)+"% van je belegde geld. De rest zit in kleinere posities die niet worden gepubliceerd.</p>";
+  }
+
+  // Overlap tussen fondsen: hoeveel van dezelfde bedrijven zitten er in?
+  const withH=pos.filter(p=>(state.meta[p.isin]||{}).holdings||!/etf|ucits|index|fund/i.test(p.name));
+  const pairs=[];
+  for(let i=0;i<withH.length;i++) for(let j=i+1;j<withH.length;j++){
+    const A=holdMap(withH[i]), B=holdMap(withH[j]);
+    if(!A||!B) continue;
+    let ov=0; for(const k in A) if(B[k]) ov+=Math.min(A[k],B[k]);
+    if(ov>0.001) pairs.push({a:withH[i].name,b:withH[j].name,ov:ov});
+  }
+  pairs.sort((x,y)=>y.ov-x.ov);
+  if(pairs.length){
+    h+='<h3 style="margin:18px 0 4px;font-size:13px">Overlap tussen fondsen</h3>';
+    h+=pairs.slice(0,8).map(p=>'<div style="display:grid;grid-template-columns:1fr 54px;gap:9px;font-size:12.5px;padding:4px 0">'+
+      "<span>"+esc(p.a.slice(0,22))+" ↔ "+esc(p.b.slice(0,22))+"</span>"+
+      '<span style="text-align:right;font-family:var(--mono);font-size:12px">'+fmtNum(p.ov*100,1)+"%</span></div>").join("");
+    h+='<p class="hint">Aandeel van de gepubliceerde posities dat in beide fondsen voorkomt. Hoog betekent dat je die twee als één beweging voelt, ook al zijn het twee regels in je overzicht.</p>';
+  } else {
+    h+='<p class="hint" style="margin-top:14px">Overlap en doorkijk vragen om de holdings per ETF. Die haalt de robot op als Yahoo ze levert; zie het logboek van je laatste run.</p>';
+  }
+  $("metrics").innerHTML=h;
+}
+function holdMap(p){
+  const m=state.meta[p.isin]||{};
+  if(m.holdings&&m.holdings.length){
+    const o={}; m.holdings.forEach(x=>{ const n=x.naam||x.symbool; if(n&&x.gewicht) o[n]=x.gewicht; });
+    return Object.keys(o).length?o:null;
+  }
+  if(/etf|ucits|index|fund/i.test(p.name)) return null;
+  const o={}; o[p.name]=1; return o;
+}
+
+/* ---------- dividend ---------- */
+function renderDiv(){
+  if(!TL.hasAcc){ $("divBody").innerHTML='<p class="hint">Voeg je rekeningoverzicht toe; daarin staan de uitkeringen.</p>'; return; }
+  const rows=state.acc.filter(a=>a.date<=sel&&(a.cat==="Dividend"||a.cat==="Dividendbelasting"));
+  if(!rows.length){ $("divBody").innerHTML='<p class="hint">Tot en met '+fmtDate(sel)+" nog geen dividend ontvangen. Van je fondsen keert alleen de Vanguard S&amp;P 500 uit; de andere zijn accumulerend.</p>"; return; }
+  const perF={}, perY={};
+  rows.forEach(a=>{
+    const eur=a.mutCur==="EUR"?a.mut:(a.fx?a.mut/a.fx:a.mut/state.fx);
+    const key=a.isin||"overig", y=a.date.slice(0,4);
+    perF[key]=perF[key]||{bruto:0,tax:0};
+    if(a.cat==="Dividend") perF[key].bruto+=eur; else perF[key].tax+=eur;
+    perY[y]=(perY[y]||0)+eur;
+  });
+  const f=Object.entries(perF).sort((a,b)=>b[1].bruto-a[1].bruto);
+  let h='<table><thead><tr><th>Fonds</th><th>Bruto</th><th>Belasting</th><th>Netto</th></tr></thead><tbody>'+
+    f.map(([isin,v])=>"<tr><td>"+esc(TL.names[isin]||isin)+'<span class="isin">'+esc(isin)+"</span></td><td>"+
+      fmtEur(v.bruto)+'</td><td class="down">'+fmtEur(v.tax)+'</td><td class="up">'+fmtEur(v.bruto+v.tax)+
+      "</td></tr>").join("")+"</tbody></table>";
+  const ys=Object.keys(perY).sort();
+  const max=Math.max(...ys.map(y=>perY[y]));
+  h+='<h3 style="margin:16px 0 8px;font-size:13px">Per jaar</h3>';
+  h+=ys.map(y=>'<div style="display:grid;grid-template-columns:44px 1fr 74px;gap:9px;align-items:center;font-family:var(--mono);font-size:12px;padding:3px 0">'+
+    "<span>"+y+'</span><span class="wbar" style="height:8px"><i style="width:'+
+    (max>0?perY[y]/max*100:0).toFixed(1)+'%"></i></span><span style="text-align:right">'+fmtEur(perY[y])+"</span></div>").join("");
+  h+='<p class="hint">Netto is na ingehouden bronbelasting. Amerikaanse dividenden zijn omgerekend met de wisselkoers van de uitkering.</p>';
+  $("divBody").innerHTML=h;
+}
+
 /* ---------- chart ---------- */
 function visibleSlice(){
   const rows=TL.rows, endTs=toTs(rows[rows.length-1].date);
@@ -941,17 +1293,22 @@ function drawChart(){
   const s=visibleSlice(), rows=TL.rows.slice(s.from,s.to+1);
   const pad={l:8,r:narrow?46:66,t:20,b:30};
   const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
+  // Bij een gekozen effect tonen we alleen dat effect: waarde tegenover inleg.
+  const F=state.focus;
+  const val=r=>{ if(!F) return r.total; const p=r.pos.find(x=>x.isin===F); return p?p.value:0; };
+  const base=r=>{ if(!F) return r.netDep; const p=r.pos.find(x=>x.isin===F); return p?p.cost:0; };
+  const cashLine=r=>F?0:r.cash;
   let max=0,min=Infinity;
-  rows.forEach(r=>{ max=Math.max(max,r.total,r.netDep); min=Math.min(min,r.total,r.netDep,r.cash); });
+  rows.forEach(r=>{ const a=val(r),b=base(r); max=Math.max(max,a,b); min=Math.min(min,a,b,cashLine(r)); });
   min=Math.min(min,0); if(!isFinite(min)) min=0;
   const span=(max-min)||1, top=max+span*0.12, bot=Math.max(0,min-span*0.05);
   const X=i=>pad.l+(rows.length<2?iw:i/(rows.length-1)*iw);
   const Y=v=>pad.t+ih-((v-bot)/((top-bot)||1))*ih;
   chartGeo={W:W,H:H,pad:pad,iw:iw,from:s.from,n:rows.length,X:X};
 
-  const path=(key,close)=>{
+  const path=(fn,close)=>{
     let d="";
-    rows.forEach((r,i)=>{ d+=(i?"L":"M")+X(i).toFixed(1)+" "+Y(r[key]).toFixed(1); });
+    rows.forEach((r,i)=>{ d+=(i?"L":"M")+X(i).toFixed(1)+" "+Y(fn(r)).toFixed(1); });
     if(close) d+="L"+X(rows.length-1).toFixed(1)+" "+Y(bot)+"L"+X(0).toFixed(1)+" "+Y(bot)+"Z";
     return d;
   };
@@ -981,8 +1338,8 @@ function drawChart(){
   const si=Math.min(Math.max(TL.index.get(sel)-s.from,0),rows.length-1);
   const cx=X(si), r=rows[si];
   const cross='<line x1="'+cx.toFixed(1)+'" y1="'+pad.t+'" x2="'+cx.toFixed(1)+'" y2="'+(pad.t+ih)+'" stroke="#EAF4F5" stroke-width="1" opacity=".5"/>'+
-    '<circle cx="'+cx.toFixed(1)+'" cy="'+Y(r.total).toFixed(1)+'" r="5" fill="#3AC8C1" stroke="#07202B" stroke-width="2"/>'+
-    '<circle cx="'+cx.toFixed(1)+'" cy="'+Y(r.netDep).toFixed(1)+'" r="3.5" fill="#F0C267" stroke="#07202B" stroke-width="1.5"/>';
+    '<circle cx="'+cx.toFixed(1)+'" cy="'+Y(val(r)).toFixed(1)+'" r="5" fill="#3AC8C1" stroke="#07202B" stroke-width="2"/>'+
+    '<circle cx="'+cx.toFixed(1)+'" cy="'+Y(base(r)).toFixed(1)+'" r="3.5" fill="#F0C267" stroke="#07202B" stroke-width="1.5"/>';
 
   svg.setAttribute("viewBox","0 0 "+W+" "+H);
   svg.innerHTML=
@@ -990,10 +1347,10 @@ function drawChart(){
     '<stop offset="0%" stop-color="#3AC8C1" stop-opacity=".38"/>'+
     '<stop offset="100%" stop-color="#3AC8C1" stop-opacity=".02"/></linearGradient></defs>'+
     grid+
-    '<path d="'+path("total",true)+'" fill="url(#wg)"/>'+
-    (TL.hasAcc?'<path d="'+path("cash")+'" fill="none" stroke="#2A6377" stroke-width="1.4"/>':"")+
-    '<path d="'+path("netDep")+'" fill="none" stroke="#F0C267" stroke-width="1.6" stroke-dasharray="5 4"/>'+
-    '<path d="'+path("total")+'" fill="none" stroke="#3AC8C1" stroke-width="2.4" stroke-linejoin="round"/>'+
+    '<path d="'+path(val,true)+'" fill="url(#wg)"/>'+
+    (TL.hasAcc&&!F?'<path d="'+path(cashLine)+'" fill="none" stroke="#2A6377" stroke-width="1.4"/>':"")+
+    '<path d="'+path(base)+'" fill="none" stroke="#F0C267" stroke-width="1.6" stroke-dasharray="5 4"/>'+
+    '<path d="'+path(val)+'" fill="none" stroke="#3AC8C1" stroke-width="2.4" stroke-linejoin="round"/>'+
     ticks+xl+cross;
 }
 
@@ -1012,8 +1369,10 @@ function scrubTo(clientX){
 }
 function showTip(clientX,clientY){
   const i=idxFromClientX(clientX), r=TL.rows[i], wrap=$("chartwrap"), b=wrap.getBoundingClientRect(), tip=$("tip");
-  tip.innerHTML=fmtDate(r.date)+"<br>"+fmtEur(r.total,0)+
-    '<br><span style="color:#F0C267">inleg '+fmtEur(r.netDep,0)+"</span>";
+  const F=state.focus, pp=F?r.pos.find(x=>x.isin===F):null;
+  tip.innerHTML=fmtDate(r.date)+"<br>"+fmtEur(F?(pp?pp.value:0):r.total,0)+
+    '<br><span style="color:#F0C267">'+(F?"inleg ":"inleg ")+
+    fmtEur(F?(pp?pp.cost:0):r.netDep,0)+"</span>";
   tip.style.opacity=1;
   const x=Math.min(Math.max(clientX-b.left+12,8),b.width-150);
   tip.style.left=x+"px"; tip.style.top=Math.max(6,clientY-b.top-58)+"px";
@@ -1077,7 +1436,7 @@ $("btnCsv").addEventListener("click",()=>{
 });
 $("btnReset").addEventListener("click",()=>{
   if(!confirm("Alle ingelezen data uit deze pagina wissen?")) return;
-  state={txs:[],acc:[],marks:{},fx:1.16,files:[]}; TL=null; sel=null;
+  state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds"}; TL=null; sel=null;
   $("app").classList.add("hidden"); $("empty").classList.remove("hidden");
   ["btnSave","btnCsv","btnReset"].forEach(id=>$(id).disabled=true);
 });
