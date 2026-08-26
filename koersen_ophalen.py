@@ -10,6 +10,7 @@ Welke fondsen opgehaald worden staat in fondsen.json.
 """
 
 import datetime
+import http.cookiejar
 import json
 import os
 import sys
@@ -104,6 +105,101 @@ def daily_series(symbol, start_date):
     raise err
 
 
+# ---------------------------------------------------------------------------
+# Optioneel: sectorweging en de grootste posities per ETF.
+#
+# Yahoo verlangt hiervoor een cookie plus een "crumb", en verandert daar
+# regelmatig iets aan. Lukt het niet, dan slaan we het over: je koersen
+# hebben er niets van te lijden. In het logboek staat wat er gebeurde.
+# ---------------------------------------------------------------------------
+_CRUMB = {"value": None, "opener": None}
+
+
+def crumb_opener():
+    """Cookie ophalen bij Yahoo en daarmee een crumb bemachtigen."""
+    if _CRUMB["value"] is not None:
+        return _CRUMB["opener"], _CRUMB["value"]
+    _CRUMB["value"] = ""          # één poging per run
+    try:
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(jar))
+        req = urllib.request.Request("https://fc.yahoo.com", headers=HEADERS)
+        try:
+            opener.open(req, timeout=20).read(1)
+        except urllib.error.HTTPError:
+            pass                  # 404 is prima, de cookie is wat we willen
+        req = urllib.request.Request(
+            "https://query1.finance.yahoo.com/v1/test/getcrumb", headers=HEADERS)
+        crumb = opener.open(req, timeout=20).read().decode("utf-8").strip()
+        if crumb and len(crumb) < 40:
+            _CRUMB["value"], _CRUMB["opener"] = crumb, opener
+            log("   profieldata: crumb verkregen")
+        else:
+            log("   profieldata: geen bruikbare crumb, sectoren worden overgeslagen")
+    except Exception as exc:
+        log("   profieldata: crumb ophalen mislukt (%s)" % exc)
+    return _CRUMB["opener"], _CRUMB["value"]
+
+
+def profile(symbol):
+    """Geeft (sectorweging, holdings) of (None, None) als Yahoo niet meewerkt."""
+    opener, crumb = crumb_opener()
+    if not crumb or opener is None:
+        return None, None
+    url = ("https://query1.finance.yahoo.com/v10/finance/quoteSummary/%s"
+           "?modules=topHoldings,assetProfile&crumb=%s"
+           % (urllib.parse.quote(symbol, safe="=^.-"),
+              urllib.parse.quote(crumb)))
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        data = json.loads(opener.open(req, timeout=30).read().decode("utf-8"))
+    except Exception as exc:
+        log("   profieldata overgeslagen (%s)" % exc)
+        return None, None
+    res = ((data.get("quoteSummary") or {}).get("result") or [{}])[0]
+    top = res.get("topHoldings") or {}
+
+    sectors = {}
+    for item in top.get("sectorWeightings") or []:
+        for key, val in item.items():
+            raw = val.get("raw") if isinstance(val, dict) else val
+            if raw:
+                sectors[SECTOR_NL.get(key, key)] = round(float(raw), 6)
+
+    holdings = []
+    for h in top.get("holdings") or []:
+        pct = h.get("holdingPercent")
+        pct = pct.get("raw") if isinstance(pct, dict) else pct
+        if not pct:
+            continue
+        holdings.append({"symbool": h.get("symbol") or "",
+                         "naam": h.get("holdingName") or h.get("symbol") or "",
+                         "gewicht": round(float(pct), 6)})
+
+    if not sectors and not holdings:
+        prof = res.get("assetProfile") or {}
+        if prof.get("sector"):
+            sectors = {SECTOR_NL.get(prof["sector"], prof["sector"]): 1.0}
+    return (sectors or None), (holdings or None)
+
+
+SECTOR_NL = {
+    "realestate": "Vastgoed", "consumer_cyclical": "Luxe consumentengoederen",
+    "basic_materials": "Basismaterialen", "consumer_defensive": "Basisconsumentengoederen",
+    "technology": "Technologie", "communication_services": "Communicatiediensten",
+    "financial_services": "Financiële diensten", "utilities": "Nutsbedrijven",
+    "industrials": "Industrie", "energy": "Energie", "healthcare": "Gezondheidszorg",
+    "Technology": "Technologie", "Financial Services": "Financiële diensten",
+    "Healthcare": "Gezondheidszorg", "Industrials": "Industrie", "Energy": "Energie",
+    "Utilities": "Nutsbedrijven", "Real Estate": "Vastgoed",
+    "Consumer Cyclical": "Luxe consumentengoederen",
+    "Consumer Defensive": "Basisconsumentengoederen",
+    "Communication Services": "Communicatiediensten",
+    "Basic Materials": "Basismaterialen",
+}
+
+
 def fx_series(currency, start_date):
     """Wisselkoers van `currency` naar EUR per dag."""
     if currency == "EUR":
@@ -194,6 +290,21 @@ def main():
             for extra in ("sector", "land"):
                 if fund.get(extra):
                     entry[extra] = fund[extra]
+            if config.get("profieldata", True):
+                sectors, holdings = profile(symbol)
+                if sectors:
+                    entry["sectorweging"] = sectors
+                    log("   sectorweging: %d sectoren" % len(sectors))
+                if holdings:
+                    entry["holdings"] = holdings
+                    log("   holdings: %d posities, grootste %s (%.1f%%)" % (
+                        len(holdings), holdings[0]["naam"],
+                        holdings[0]["gewicht"] * 100))
+            else:
+                oude = (old.get("fondsen", {}).get(isin) or {})
+                for k in ("sectorweging", "holdings"):
+                    if oude.get(k):
+                        entry[k] = oude[k]
             if live_stamp:
                 entry["koers_tijd"] = live_stamp
             result[isin] = entry
@@ -214,7 +325,9 @@ def main():
     # veranderd zijn.
     def prices_only(funds):
         return {k: {"koersen": v.get("koersen"), "ticker": v.get("ticker"),
-                    "sector": v.get("sector"), "land": v.get("land")}
+                    "sector": v.get("sector"), "land": v.get("land"),
+                    "sectorweging": v.get("sectorweging"),
+                    "holdings": v.get("holdings")}
                 for k, v in (funds or {}).items()}
 
     if prices_only(old.get("fondsen")) == prices_only(result):
