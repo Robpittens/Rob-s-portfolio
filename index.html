@@ -224,6 +224,7 @@
       </div>
       <div class="big" id="bigVal">—</div>
       <div style="margin-top:8px" class="chips" id="valChips"></div>
+      <div class="ranges" id="modeTabs" style="margin-top:10px"></div>
     </div>
     <div class="kpis" id="kpis"></div>
   </div>
@@ -627,9 +628,10 @@ function buildTimeline(state){
       if(!hasAcc) netDep+=Math.abs(t.eurValue)*(t.qty>0?1:-1)+Math.abs(t.fee||0);
     });
     (accByDay.get(d)||[]).forEach(a=>{
-      // Een "Cash Sweep Transfer" toont het saldo van je flatex-geldrekening,
-      // niet je DeGiro-cash. Die regel mag het saldo dus niet bepalen.
-      if(a.salCur&&a.sal!=null&&!/cash sweep/.test(norm(a.desc))) bal[a.salCur]=a.sal;
+      // Interne overboekingen tussen je DeGiro-cash en je flatex-geldrekening
+      // rapporteren het saldo van de andere rekening — soms zelfs negatief.
+      // Het bruikbare saldo staat op de gewone boekingen.
+      if(a.salCur&&a.sal!=null&&a.cat!=="Intern") bal[a.salCur]=a.sal;
       const eur=a.mut==null?0:(a.mutCur==="EUR"?a.mut:(a.fx?a.mut/a.fx:a.mut/fx));
       catTot[a.cat]=(catTot[a.cat]||0)+eur;
       if(a.isin&&perIsin[a.isin]){
@@ -684,7 +686,7 @@ function xirr(flows,guess){
 //ENGINE>>
 
 /* ===================== state + rendering ===================== */
-var state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds"};
+var state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal"};
 var TL=null, sel=null, range="all", pinned=null;
 
 const fmtEur=(v,dec)=>v==null||!isFinite(v)?"—":
@@ -722,7 +724,7 @@ async function handleFiles(list){
           if(!r.funds) throw new Error("geen enkel fonds uit dit bestand zit in jouw portefeuille");
           autoStatus(r.funds+" fondsen bijgewerkt uit "+f.name+" · "+r.pts.toLocaleString("nl-NL")+" koersen");
         } else {
-          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds"},o);
+          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal"},o);
           state.focus=null; state.meta=state.meta||{};
         }
         continue;
@@ -815,35 +817,84 @@ function rowAt(d){ return TL.rows[TL.index.get(d)]; }
 function renderAll(){
   const r=rowAt(sel);
   $("dateIn").value=sel;
-  $("bigVal").textContent=fmtEur(r.total);
-  const res=r.total-r.netDep, pct=r.netDep>0?res/r.netDep:null;
+  const F=state.focus;
+  const p=F?r.pos.find(x=>x.isin===F):null;
+  const led=F?(TL.perIsin[F]||{}):null, hd=F?(TL.hold[F]||{}):null;
+
+  // Grote getal: de stand van de portefeuille, of van het gekozen effect.
+  $("bigVal").textContent=fmtEur(F?(p?p.value:0):r.total);
   const q=r.exactShare, tr=r.trailShare;
   const qTxt=r.inv<=0?"geen posities":
     q>=0.999?"volledig op echte koersen":
     q+tr>=0.999?"laatst bekende koersen":
     q<=0.001&&tr<=0.001?"koersen geïnterpoleerd":
     Math.round(q*100)+"% op echte koersen";
-  $("valChips").innerHTML=
-    '<span class="chip">beleggingen '+fmtEur(r.inv,0)+"</span>"+
-    (TL.hasAcc?'<span class="chip">cash '+fmtEur(r.cash,0)+"</span>":"")+
-    '<span class="chip">'+qTxt+"</span>";
-  const flows=[];
-  if(TL.hasAcc){
-    state.acc.forEach(a=>{ if(a.cat==="Storting/Opname"&&a.date<=sel&&a.mut){
-      flows.push({date:a.date,amt:-(a.mutCur==="EUR"?a.mut:a.mut/(a.fx||state.fx))}); } });
-    flows.sort((x,y)=>x.date<y.date?-1:1);
-    if(flows.length) flows.push({date:sel,amt:r.total});
+  $("valChips").innerHTML=F?
+    ('<span class="chip">'+esc((TL.names[F]||F).slice(0,34))+"</span>"+
+     (p?'<span class="chip">'+fmtNum(p.qty,p.qty%1?4:0)+" × "+fmtNum(p.price)+"</span>":
+        '<span class="chip">niet in bezit op deze dag</span>')+
+     '<span class="chip">'+(p?(p.exact?"echte koers":p.trail?"laatst bekende koers":"geschatte koers"):"—")+"</span>")
+    :('<span class="chip">beleggingen '+fmtEur(r.inv,0)+"</span>"+
+      (TL.hasAcc?'<span class="chip">cash '+fmtEur(r.cash,0)+"</span>":"")+
+      '<span class="chip">'+qTxt+"</span>");
+
+  // Periodeschakelaar: sinds het begin, of alleen over het zichtbare venster.
+  const s0=visibleSlice(), r0=TL.rows[s0.from];
+  const periodeMogelijk=s0.from>0;
+  $("modeTabs").innerHTML=
+    '<button data-m="totaal" aria-pressed="'+(state.mode!=="periode")+'">sinds start</button>'+
+    '<button data-m="periode" aria-pressed="'+(state.mode==="periode")+'"'+
+    (periodeMogelijk?"":" disabled")+">deze periode</button>";
+
+  let k;
+  if(state.mode==="periode"&&periodeMogelijk){
+    const v1=F?(p?p.value:0):r.total, v0=F?((r0.pos.find(x=>x.isin===F)||{}).value||0):r0.total;
+    const c1=F?(p?p.cost:0):r.netDep, c0=F?((r0.pos.find(x=>x.isin===F)||{}).cost||0):r0.netDep;
+    const inleg=c1-c0, res=(v1-v0)-inleg;
+    const basis=v0+Math.max(inleg,0);
+    const pct=basis>0?res/basis:null;
+    k=[
+      {k:"Vanaf",v:fmtDate(r0.date),c:""},
+      {k:F?"Bijgekocht":"Inleg in periode",v:fmtEur(inleg,0),c:""},
+      {k:"Resultaat periode",v:fmtEur(res,0),c:res>=0?"up":"down"},
+      {k:"Rendement periode",v:fmtPct(pct),c:pct>=0?"up":"down"}
+    ];
+  } else if(F){
+    const value=p?p.value:0, cost=p?p.cost:0;
+    const res=value-cost+(hd.realized||0)+(led.div||0)+(led.tax||0);
+    const inlegTot=state.txs.filter(t=>t.isin===F&&t.qty>0)
+      .reduce((s2,t)=>s2+Math.abs(t.eurValue)+Math.abs(t.fee||0),0);
+    const pct=inlegTot>0?res/inlegTot:null;
+    k=[
+      {k:"Ingelegd",v:fmtEur(inlegTot,0),c:""},
+      {k:"Resultaat",v:fmtEur(res,0),c:res>=0?"up":"down"},
+      {k:"Rendement",v:fmtPct(pct),c:pct>=0?"up":"down"},
+      {k:"Dividend",v:fmtEur((led.div||0)+(led.tax||0),0),c:""}
+    ];
+  } else {
+    const res=r.total-r.netDep, pct=r.netDep>0?res/r.netDep:null;
+    const flows=[];
+    if(TL.hasAcc){
+      state.acc.forEach(a=>{ if(a.cat==="Storting/Opname"&&a.date<=sel&&a.mut){
+        flows.push({date:a.date,amt:-(a.mutCur==="EUR"?a.mut:a.mut/(a.fx||state.fx))}); } });
+      flows.sort((x,y)=>x.date<y.date?-1:1);
+      if(flows.length) flows.push({date:sel,amt:r.total});
+    }
+    const irr=flows.length>2?xirr(flows):null;
+    k=[
+      {k:TL.hasAcc?"Netto inleg":"Netto belegd",v:fmtEur(r.netDep,0),c:""},
+      {k:"Resultaat",v:fmtEur(res,0),c:res>=0?"up":"down"},
+      {k:"Rendement",v:fmtPct(pct),c:pct>=0?"up":"down"},
+      {k:"Per jaar (IRR)",v:irr==null?"—":fmtPct(irr),c:irr==null?"":(irr>=0?"up":"down")}
+    ];
   }
-  const irr=flows.length>2?xirr(flows):null;
-  const k=[
-    {k:TL.hasAcc?"Netto inleg":"Netto belegd",v:fmtEur(r.netDep,0),c:""},
-    {k:"Resultaat",v:fmtEur(res,0),c:res>=0?"up":"down"},
-    {k:"Rendement",v:fmtPct(pct),c:pct>=0?"up":"down"},
-    {k:"Per jaar (IRR)",v:irr==null?"—":fmtPct(irr),c:irr==null?"":(irr>=0?"up":"down")}
-  ];
   $("kpis").innerHTML=k.map(x=>'<div class="kpi"><div class="k">'+x.k+'</div><div class="v '+x.c+'">'+x.v+"</div></div>").join("");
   renderPos(r); renderAlloc(r); renderMetrics(r); renderDiv(); renderCash(r); drawChart();
 }
+$("modeTabs").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b||b.disabled) return;
+  state.mode=b.dataset.m; renderAll();
+});
 
 const PAL=["#3AC8C1","#F0C267","#7FA3B0","#EE7B5F","#5FD3A6","#B48EEA","#6FA8DC","#E0A3C4","#9BD16B","#4E9FD1"];
 function colorFor(k,i){ return PAL[i%PAL.length]; }
@@ -926,6 +977,11 @@ function renderDetail(r){
   $("posTable").innerHTML=body;
   $("back").addEventListener("click",()=>{ state.focus=null; renderAll(); });
 }
+// De lijst wordt telkens opnieuw opgebouwd, dus we luisteren op de container.
+$("posTable").addEventListener("click",e=>{
+  const b=e.target.closest(".fund"); if(!b) return;
+  state.focus=b.dataset.isin; state.mode="totaal"; renderAll();
+});
 
 function renderCash(r){
   if(!TL.hasAcc){
@@ -1051,7 +1107,9 @@ function applyPriceFile(o){
 }
 function autoStatus(txt){ const e=$("autoStatus"); if(e) e.textContent=txt; }
 async function fetchPrices(url,quiet){
-  if(!url) return;
+  const n=normaliseUrl(url);
+  if(n.error){ autoStatus(n.error); if(!quiet) showErr(n.error); return; }
+  url=n.url;
   autoStatus("Koersen ophalen…");
   try{
     const res=await fetch(url,{cache:"no-store"});
@@ -1067,16 +1125,44 @@ async function fetchPrices(url,quiet){
       (r.unknown.length?" · "+r.unknown.length+" fonds niet in bezit":""));
   }catch(e){
     const raw=e.message||String(e);
-    const msg=/failed to fetch|networkerror|load failed/i.test(raw)?
-      "geen verbinding met dat adres — controleer de link en of het project op Public staat":raw;
+    let msg=raw;
+    if(/failed to fetch|networkerror|load failed/i.test(raw))
+      msg="geen verbinding met dat adres — controleer de link en of het project op Public staat";
+    else if(/did not match the expected pattern|invalid url/i.test(raw))
+      msg="het adres is niet geldig. Ga in GitHub naar koersen.json, klik op Raw en kopieer het adres uit de adresbalk";
+    else if(/json|unexpected token/i.test(raw))
+      msg="op dat adres staat geen leesbaar koersenbestand — heb je de Raw-link gebruikt en niet de GitHub-pagina?";
     autoStatus("Ophalen mislukt: "+msg);
     if(!quiet) showErr("Koersen ophalen mislukt: "+msg);
   }
 }
+// Het adres kan op allerlei manieren binnenkomen: met een afbreekteken uit een
+// verkorte weergave, met spaties of regeleindes, of als de gewone GitHub-pagina
+// in plaats van de Raw-link. Dat maken we hier recht.
+function normaliseUrl(raw){
+  const rawStr=String(raw||"");
+  if(/[\u2026]|\.\.\./.test(rawStr))
+    return {error:"Dit adres is afgekort weergegeven (je ziet drie puntjes). Ga in GitHub naar koersen.json, klik op Raw en kopieer het volledige adres uit de adresbalk."};
+  let u=rawStr.replace(/[\s\u00a0]+/g,"");
+  if(!u) return {error:"Vul het adres van je koersen.json in."};
+  if(/^raw\.githubusercontent|^github\.com/.test(u)) u="https://"+u;
+  // github.com/naam/project/blob/main/koersen.json -> raw.githubusercontent.com/...
+  const m=u.match(/^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/(?:blob|raw)\/(.+)$/);
+  if(m) u="https://raw.githubusercontent.com/"+m[1]+"/"+m[2]+"/"+m[3];
+  let parsed;
+  try{ parsed=new URL(u); }
+  catch(e){ return {error:"Dat is geen geldig adres. Ga in GitHub naar koersen.json, klik op Raw en kopieer het adres uit de adresbalk."}; }
+  if(!/^https?:$/.test(parsed.protocol)) return {error:"Het adres moet met https:// beginnen."};
+  if(/raw\.githubusercontent\.com$/.test(parsed.hostname)){
+    const parts=parsed.pathname.split("/").filter(Boolean);
+    if(parts.length<4) return {error:"Dit adres is niet compleet. Het hoort de vorm raw.githubusercontent.com/naam/project/main/koersen.json te hebben."};
+  }
+  return {url:parsed.href};
+}
 $("autoGo").addEventListener("click",()=>{
-  const u=$("autoUrl").value.trim();
-  if(!/^https?:\/\//.test(u)){ showErr("Vul het volledige adres van je koersen.json in, beginnend met https://"); return; }
-  showErr(""); fetchPrices(u,false);
+  const n=normaliseUrl($("autoUrl").value);
+  if(n.error){ showErr(n.error); autoStatus(n.error); return; }
+  showErr(""); $("autoUrl").value=n.url; fetchPrices(n.url,false);
 });
 $("autoUrl").addEventListener("keydown",e=>{ if(e.key==="Enter") $("autoGo").click(); });
 
@@ -1146,12 +1232,28 @@ $("allocTabs").addEventListener("click",e=>{
 /* ---------- metingen ---------- */
 function renderMetrics(r){
   if(!r.pos.length){ $("metrics").innerHTML='<p class="hint">Nog geen posities om te meten.</p>'; return; }
+  let h="";
+  if(!state.focus){
+    // Opbouw van het resultaat, zodat je kunt zien dat cash er niet in zit.
+    const unreal=r.pos.reduce((s2,p)=>s2+(p.value-p.cost),0);
+    const real=r.realized||0, dv=(r.div||0)+(r.tax||0);
+    const som=unreal+real+dv+(r.fees||0);
+    h+='<h3 style="margin:0 0 4px;font-size:13px">Waaruit je resultaat bestaat</h3><div class="kv">'+
+      "<div>Koerswinst op wat je nog hebt</div><div>"+fmtEur(unreal)+"</div>"+
+      "<div>Gerealiseerd op verkopen</div><div>"+fmtEur(real)+"</div>"+
+      "<div>Dividend na bronbelasting</div><div>"+fmtEur(dv)+"</div>"+
+      "<div>Kosten</div><div>"+fmtEur(r.fees||0)+"</div>"+
+      "<div><b>Samen</b></div><div><b>"+fmtEur(som)+"</b></div>"+
+      "</div>"+
+      '<p class="hint">Totale waarde min netto inleg geeft '+fmtEur(r.total-r.netDep)+
+      ". Je cash telt niet als winst: die komt uit je inleg en valt daar dus tegen weg.</p>";
+  }
   const pos=r.pos.slice().sort((a,b)=>b.value-a.value);
   const w=pos.map(p=>p.value/r.inv);
   const hhi=w.reduce((s,x)=>s+x*x,0);
   const eff=1/hhi;
   const top3=w.slice(0,3).reduce((s,x)=>s+x,0);
-  let h='<div class="kv">'+
+  h+='<div class="kv">'+
     "<div>Grootste positie</div><div>"+fmtNum(w[0]*100,1)+"% ("+esc(pos[0].name.slice(0,26))+")</div>"+
     "<div>Top 3 samen</div><div>"+fmtNum(top3*100,1)+"%</div>"+
     "<div>Effectief aantal posities</div><div>"+fmtNum(eff,1)+" van "+pos.length+"</div>"+
@@ -1266,6 +1368,8 @@ function visibleSlice(){
   let startTs;
   if(range==="all") return {from:0,to:rows.length-1};
   if(range==="ytd") startTs=toTs(rows[rows.length-1].date.slice(0,4)+"-01-01");
+  else if(range==="1d") startTs=endTs-DAY;
+  else if(range==="1w") startTs=endTs-7*DAY;
   else{
     const m={"1m":1,"3m":3,"6m":6,"1j":12,"3j":36}[range]||12;
     const d=new Date(endTs); d.setUTCMonth(d.getUTCMonth()-m); startTs=d.getTime();
@@ -1274,7 +1378,8 @@ function visibleSlice(){
   return {from:from,to:rows.length-1};
 }
 function renderRanges(){
-  const opts=[["1m","1M"],["3m","3M"],["6m","6M"],["ytd","YTD"],["1j","1J"],["3j","3J"],["all","Alles"]];
+  const opts=[["1d","1D"],["1w","1W"],["1m","1M"],["3m","3M"],["6m","6M"],["ytd","YTD"],
+              ["1j","1J"],["3j","3J"],["all","Alles"]];
   $("ranges").innerHTML=opts.map(o=>'<button data-r="'+o[0]+'" aria-pressed="'+(range===o[0])+'">'+o[1]+"</button>").join("");
 }
 $("ranges").addEventListener("click",e=>{
@@ -1436,7 +1541,7 @@ $("btnCsv").addEventListener("click",()=>{
 });
 $("btnReset").addEventListener("click",()=>{
   if(!confirm("Alle ingelezen data uit deze pagina wissen?")) return;
-  state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds"}; TL=null; sel=null;
+  state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal"}; TL=null; sel=null;
   $("app").classList.add("hidden"); $("empty").classList.remove("hidden");
   ["btnSave","btnCsv","btnReset"].forEach(id=>$(id).disabled=true);
 });
