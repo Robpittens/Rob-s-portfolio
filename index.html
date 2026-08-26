@@ -270,12 +270,7 @@
       <svg id="chart" viewBox="0 0 900 380" preserveAspectRatio="xMidYMid meet"></svg>
       <div class="tip" id="tip"></div>
     </div>
-    <div class="legend">
-      <span><i style="border-color:var(--water)"></i>Totale waarde</span>
-      <span><i style="border-color:var(--sand);border-top-style:dashed"></i>Netto inleg</span>
-      <span><i style="border-color:var(--line2)"></i>Cash</span>
-      <span style="color:var(--dim)">Streepjes onderaan = dagen met een echte koers</span>
-    </div>
+    <div class="legend" id="legend"></div>
   </div>
 
   <div class="grid2">
@@ -655,6 +650,13 @@ function buildTimeline(state){
   const accByDay=new Map();
   acc.forEach(a=>{ if(!accByDay.has(a.date)) accByDay.set(a.date,[]); accByDay.get(a.date).push(a); });
 
+  // Meetlat: elke storting gaat op dezelfde dag in de index.
+  const benchAnchors=state.bench&&state.bench.koersen?
+    Object.keys(state.bench.koersen).map(d=>({date:d,price:parseFloat(state.bench.koersen[d])}))
+      .filter(a=>a.price>0).sort((a,b)=>a.date<b.date?-1:1):[];
+  const benchCurve=benchAnchors.length?curve(benchAnchors,days):null;
+  let benchUnits=0, prevNet=0;
+
   const hold={}; isins.forEach(is=>hold[is]={qty:0,cost:0,realized:0,fees:0,name:is});
   // Per fonds bijhouden wat je eraan verdiend en betaald hebt.
   const perIsin={}; isins.forEach(is=>perIsin[is]={div:0,tax:0,costs:0,invested:0,beurs:"",currency:"EUR"});
@@ -712,9 +714,17 @@ function buildTimeline(state){
                 div:perIsin[is].div,tax:perIsin[is].tax,realized:h.realized,
                 fees:h.fees,beurs:perIsin[is].beurs,currency:perIsin[is].currency});
     }
+    let benchVal=null;
+    if(benchCurve){
+      const bp=benchCurve.p[i];
+      if(bp>0){ benchUnits+=(netDep-prevNet)/bp; benchVal=benchUnits*bp; }
+      else benchVal=benchUnits>0?0:null;
+      prevNet=netDep;
+    }
     let cash=0; for(const c in bal) cash+=(c==="EUR")?bal[c]:bal[c]*rate(c,d);
     rowsOut.push({date:d, inv:inv, cash:cash, total:inv+cash, netDep:netDep,
       exactShare:inv>0?exactVal/inv:1, trailShare:inv>0?trailVal/inv:0, pos:pos,
+      bench:benchVal,
       div:div, tax:tax, fees:fees, rente:rente, other:other,
       cats:Object.assign({},catTot),
       realized:isins.reduce((s,is)=>s+hold[is].realized,0),
@@ -722,6 +732,7 @@ function buildTimeline(state){
   }
   return {days:days, rows:rowsOut, index:index, isins:isins, anchors:ancMap,
           anchorDays:anchorDays, curves:curves, hasAcc:hasAcc,
+          hasBench:!!benchCurve, benchNaam:(state.bench||{}).naam||"",
           perIsin:perIsin, hold:hold, names:Object.fromEntries(isins.map(is=>[is,hold[is].name]))};
 }
 
@@ -740,7 +751,7 @@ function xirr(flows,guess){
 //ENGINE>>
 
 /* ===================== state + rendering ===================== */
-var state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{}};
+var state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{},bench:null};
 var TL=null, sel=null, range="all", pinned=null;
 
 const fmtEur=(v,dec)=>v==null||!isFinite(v)?"—":
@@ -778,7 +789,7 @@ async function handleFiles(list){
           if(!r.funds) throw new Error("geen enkel fonds uit dit bestand zit in jouw portefeuille");
           autoStatus(r.funds+" fondsen bijgewerkt uit "+f.name+" · "+r.pts.toLocaleString("nl-NL")+" koersen");
         } else {
-          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{}},o);
+          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{},bench:null},o);
           state.focus=null; state.meta=state.meta||{};
         }
         continue;
@@ -1151,10 +1162,20 @@ function isPriceFile(o){ return !!(o && o.fondsen && !o.txs && !Array.isArray(o.
 function applyPriceFile(o){
   let funds=0, pts=0; const unknown=[];
   if(o.wisselkoersen&&typeof o.wisselkoersen==="object") state.fxSeries=o.wisselkoersen;
+  // Een fonds dat als benchmark is aangemerkt hoort niet in je posities, maar
+  // dient als meetlat: wat als je inleg hierin was gegaan?
+  state.bench=null;
+  for(const key in o.fondsen){
+    const f=o.fondsen[key]||{};
+    if(f.benchmark&&f.koersen){
+      state.bench={naam:f.naam||f.ticker||key,ticker:f.ticker||"",koersen:f.koersen};
+      break;
+    }
+  }
   const held=new Set(state.txs.map(t=>t.isin));
   for(const isin in o.fondsen){
     const f=o.fondsen[isin]||{}, k=f.koersen||f.prices||{};
-    if(!held.has(isin)){ unknown.push(isin); continue; }
+    if(!held.has(isin)){ if(!(o.fondsen[isin]||{}).benchmark) unknown.push(isin); continue; }
     const add=[];
     for(const d in k){
       const day=parseDate(d), p=parseNum(k[d]);
@@ -1314,6 +1335,17 @@ function renderMetrics(r){
       "</div>"+
       '<p class="hint">Totale waarde min netto inleg geeft '+fmtEur(r.total-r.netDep)+
       ". Je cash telt niet als winst: die komt uit je inleg en valt daar dus tegen weg.</p>";
+  }
+  if(!state.focus&&TL.hasBench&&r.bench!=null&&r.netDep>0){
+    const mij=r.total-r.netDep, idx=r.bench-r.netDep, verschil=r.total-r.bench;
+    h+='<h3 style="margin:18px 0 4px;font-size:13px">Jij tegenover de markt</h3><div class="kv">'+
+      "<div>Jouw portefeuille</div><div>"+fmtEur(r.total)+" ("+fmtPct(mij/r.netDep)+")</div>"+
+      "<div>Zelfde inleg in "+esc(TL.benchNaam)+"</div><div>"+fmtEur(r.bench)+" ("+fmtPct(idx/r.netDep)+")</div>"+
+      '<div><b>Verschil</b></div><div><b class="'+(verschil>=0?"up":"down")+'">'+
+      (verschil>=0?"+":"")+fmtEur(verschil)+"</b></div></div>"+
+      '<p class="hint">Elke storting is op dezelfde dag in de index gerekend. '+
+      "Jouw cash stond een deel van de tijd stil, de index is direct volledig belegd — "+
+      "dat verklaart een deel van het verschil.</p>";
   }
   const pos=r.pos.slice().sort((a,b)=>b.value-a.value);
   const w=pos.map(p=>p.value/r.inv);
@@ -1476,8 +1508,11 @@ function drawChart(){
   const val=r=>{ if(!F) return r.total; const p=r.pos.find(x=>x.isin===F); return p?p.value:0; };
   const base=r=>{ if(!F) return r.netDep; const p=r.pos.find(x=>x.isin===F); return p?p.cost:0; };
   const cashLine=r=>F?0:r.cash;
+  const benchOn=TL.hasBench&&!F;
+  const benchLine=r=>r.bench==null?0:r.bench;
   let max=0,min=Infinity;
-  rows.forEach(r=>{ const a=val(r),b=base(r); max=Math.max(max,a,b); min=Math.min(min,a,b,cashLine(r)); });
+  rows.forEach(r=>{ const a=val(r),b=base(r); max=Math.max(max,a,b,benchOn?benchLine(r):0);
+    min=Math.min(min,a,b,cashLine(r)); });
   min=Math.min(min,0); if(!isFinite(min)) min=0;
   const span=(max-min)||1, top=max+span*0.12, bot=Math.max(0,min-span*0.05);
   const X=i=>pad.l+(rows.length<2?iw:i/(rows.length-1)*iw);
@@ -1519,6 +1554,12 @@ function drawChart(){
     '<circle cx="'+cx.toFixed(1)+'" cy="'+Y(val(r)).toFixed(1)+'" r="5" fill="#3AC8C1" stroke="#07202B" stroke-width="2"/>'+
     '<circle cx="'+cx.toFixed(1)+'" cy="'+Y(base(r)).toFixed(1)+'" r="3.5" fill="#F0C267" stroke="#07202B" stroke-width="1.5"/>';
 
+  $("legend").innerHTML=
+    '<span><i style="border-color:var(--water)"></i>'+(F?"Waarde van dit effect":"Totale waarde")+"</span>"+
+    '<span><i style="border-color:var(--sand);border-top-style:dashed"></i>'+(F?"Wat je erin stopte":"Netto inleg")+"</span>"+
+    (TL.hasAcc&&!F?'<span><i style="border-color:var(--line2)"></i>Cash</span>':"")+
+    (benchOn?'<span><i style="border-color:#B48EEA"></i>Zelfde inleg in '+esc(TL.benchNaam)+"</span>":"")+
+    '<span style="color:var(--dim)">Streepjes onderaan = dagen met een echte koers</span>';
   svg.setAttribute("viewBox","0 0 "+W+" "+H);
   svg.innerHTML=
     '<defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">'+
@@ -1527,6 +1568,7 @@ function drawChart(){
     grid+
     '<path d="'+path(val,true)+'" fill="url(#wg)"/>'+
     (TL.hasAcc&&!F?'<path d="'+path(cashLine)+'" fill="none" stroke="#2A6377" stroke-width="1.4"/>':"")+
+    (benchOn?'<path d="'+path(benchLine)+'" fill="none" stroke="#B48EEA" stroke-width="1.8" opacity=".95"/>':"")+
     '<path d="'+path(base)+'" fill="none" stroke="#F0C267" stroke-width="1.6" stroke-dasharray="5 4"/>'+
     '<path d="'+path(val)+'" fill="none" stroke="#3AC8C1" stroke-width="2.4" stroke-linejoin="round"/>'+
     ticks+xl+cross;
@@ -1614,7 +1656,7 @@ $("btnCsv").addEventListener("click",()=>{
 });
 $("btnReset").addEventListener("click",()=>{
   if(!confirm("Alle ingelezen data uit deze pagina wissen?")) return;
-  state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{}}; TL=null; sel=null;
+  state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{},bench:null}; TL=null; sel=null;
   $("app").classList.add("hidden"); $("empty").classList.remove("hidden");
   ["btnSave","btnCsv","btnReset"].forEach(id=>$(id).disabled=true);
 });
