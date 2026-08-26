@@ -323,7 +323,7 @@
         <div id="priceEditor"></div>
         <div class="prow" style="border-top:1px solid var(--line);margin-top:6px">
           <div class="head"><b style="font-size:13px">EUR/USD</b></div>
-          <div class="meta">Voor het omrekenen van cash en dividend in dollars.</div>
+          <div class="meta" id="fxInfo">Voor het omrekenen van cash en dividend in dollars.</div>
           <div class="ctl"><input type="number" step="0.0001" id="fxIn"></div>
         </div>
       </div>
@@ -615,8 +615,26 @@ function cmpAcc(a,b){
   if(ta!==tb) return ta<tb?-1:1;
   return (b.ord||0)-(a.ord||0);   // DeGiro zet de nieuwste regel bovenaan
 }
+// Wisselkoers van een valuta naar euro op een bepaalde dag: uit de reeks van
+// de robot als die er is, anders het handmatig ingevulde getal.
+function rateBuilder(state){
+  const ser=state.fxSeries||{}, fallback=1/(state.fx||1);
+  const cache={};
+  return function(cur,date){
+    if(cur==="EUR") return 1;
+    const s=ser[cur];
+    if(!s) return fallback;
+    if(!cache[cur]) cache[cur]=Object.keys(s).sort();
+    const days=cache[cur];
+    let lo=0,hi=days.length-1,best=null;
+    while(lo<=hi){ const mid=(lo+hi)>>1;
+      if(days[mid]<=date){ best=days[mid]; lo=mid+1; } else hi=mid-1; }
+    return s[best!=null?best:days[0]];
+  };
+}
 function buildTimeline(state){
   const txs=state.txs||[], acc=(state.acc||[]).slice().sort(cmpAcc), fx=state.fx||1;
+  const rate=rateBuilder(state);
   const dates=[]; txs.forEach(t=>dates.push(t.date)); acc.forEach(a=>dates.push(a.date));
   if(!dates.length) return null;
   dates.sort();
@@ -667,7 +685,8 @@ function buildTimeline(state){
       // rapporteren het saldo van de andere rekening — soms zelfs negatief.
       // Het bruikbare saldo staat op de gewone boekingen.
       if(a.salCur&&a.sal!=null&&a.cat!=="Intern") bal[a.salCur]=a.sal;
-      const eur=a.mut==null?0:(a.mutCur==="EUR"?a.mut:(a.fx?a.mut/a.fx:a.mut/fx));
+      const eur=a.mut==null?0:(a.mutCur==="EUR"?a.mut:
+        (a.fx?a.mut/a.fx:a.mut*rate(a.mutCur,d)));
       catTot[a.cat]=(catTot[a.cat]||0)+eur;
       if(a.isin&&perIsin[a.isin]){
         if(a.cat==="Dividend") perIsin[a.isin].div+=eur;
@@ -693,7 +712,7 @@ function buildTimeline(state){
                 div:perIsin[is].div,tax:perIsin[is].tax,realized:h.realized,
                 fees:h.fees,beurs:perIsin[is].beurs,currency:perIsin[is].currency});
     }
-    let cash=0; for(const c in bal) cash+=(c==="EUR")?bal[c]:bal[c]*fx;
+    let cash=0; for(const c in bal) cash+=(c==="EUR")?bal[c]:bal[c]*rate(c,d);
     rowsOut.push({date:d, inv:inv, cash:cash, total:inv+cash, netDep:netDep,
       exactShare:inv>0?exactVal/inv:1, trailShare:inv>0?trailVal/inv:0, pos:pos,
       div:div, tax:tax, fees:fees, rente:rente, other:other,
@@ -721,7 +740,7 @@ function xirr(flows,guess){
 //ENGINE>>
 
 /* ===================== state + rendering ===================== */
-var state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal"};
+var state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{}};
 var TL=null, sel=null, range="all", pinned=null;
 
 const fmtEur=(v,dec)=>v==null||!isFinite(v)?"—":
@@ -759,7 +778,7 @@ async function handleFiles(list){
           if(!r.funds) throw new Error("geen enkel fonds uit dit bestand zit in jouw portefeuille");
           autoStatus(r.funds+" fondsen bijgewerkt uit "+f.name+" · "+r.pts.toLocaleString("nl-NL")+" koersen");
         } else {
-          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal"},o);
+          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{}},o);
           state.focus=null; state.meta=state.meta||{};
         }
         continue;
@@ -839,6 +858,18 @@ function recompute(resetSel){
   ["btnSave","btnCsv","btnReset"].forEach(id=>$(id).disabled=false);
   $("dateIn").min=TL.days[0]; $("dateIn").max=TL.days[TL.days.length-1];
   $("fxIn").value=state.fx;
+  // Vertellen of de wisselkoers automatisch binnenkomt of handmatig is.
+  const ser=(state.fxSeries||{}).USD;
+  if(ser){
+    const last=Object.keys(ser).sort().pop();
+    const perEur=ser[last]?1/ser[last]:null;
+    $("fxInfo").innerHTML="Automatisch: 1 euro = "+fmtNum(perEur,4)+" dollar op "+fmtDate(last)+
+      ". Elke boeking wordt omgerekend met de koers van zijn eigen dag; "+
+      "het veld hieronder is alleen nog een terugvaloptie.";
+  } else {
+    $("fxInfo").textContent="Handmatig. Zodra de robot wisselkoersen meelevert, "+
+      "rekent de pagina elke dag met zijn eigen koers.";
+  }
   if(state.priceUrl&&$("autoUrl").value!==state.priceUrl){
     $("autoUrl").value=state.priceUrl;
     autoStatus("Adres bewaard — koersen worden opgehaald…");
@@ -911,7 +942,7 @@ function renderAll(){
     const flows=[];
     if(TL.hasAcc){
       state.acc.forEach(a=>{ if(a.cat==="Storting/Opname"&&a.date<=sel&&a.mut){
-        flows.push({date:a.date,amt:-(a.mutCur==="EUR"?a.mut:a.mut/(a.fx||state.fx))}); } });
+        flows.push({date:a.date,amt:-eurOf(a)}); } });
       flows.sort((x,y)=>x.date<y.date?-1:1);
       if(flows.length) flows.push({date:sel,amt:r.total});
     }
@@ -1002,7 +1033,7 @@ function renderDetail(r){
   if(divl.length){
     body+='<h3 style="margin:18px 0 2px;font-size:14px">Dividenden</h3>'+
       '<table><thead><tr><th>Datum</th><th>Soort</th><th>Bedrag</th></tr></thead><tbody>'+
-      divl.slice().reverse().map(a=>{const eur=a.mutCur==="EUR"?a.mut:(a.fx?a.mut/a.fx:a.mut/state.fx);
+      divl.slice().reverse().map(a=>{const eur=eurOf(a);
         return "<tr><td>"+fmtDate(a.date)+"</td><td>"+(a.cat==="Dividend"?"uitkering":"bronbelasting")+
         '</td><td class="'+(eur>=0?"up":"down")+'">'+fmtEur(eur)+
         (a.mutCur!=="EUR"?' <span class="isin">('+fmtNum(a.mut)+" "+a.mutCur+")</span>":"")+"</td></tr>";}).join("")+
@@ -1119,6 +1150,7 @@ $("fxIn").addEventListener("change",e=>{
 function isPriceFile(o){ return !!(o && o.fondsen && !o.txs && !Array.isArray(o.fondsen)); }
 function applyPriceFile(o){
   let funds=0, pts=0; const unknown=[];
+  if(o.wisselkoersen&&typeof o.wisselkoersen==="object") state.fxSeries=o.wisselkoersen;
   const held=new Set(state.txs.map(t=>t.isin));
   for(const isin in o.fondsen){
     const f=o.fondsen[isin]||{}, k=f.koersen||f.prices||{};
@@ -1370,13 +1402,19 @@ function holdMap(p){
 }
 
 /* ---------- dividend ---------- */
+// Eén plek voor het omrekenen van een boeking naar euro.
+function eurOf(a){
+  if(a.mutCur==="EUR"||a.mut==null) return a.mut||0;
+  if(a.fx) return a.mut/a.fx;
+  return a.mut*rateBuilder(state)(a.mutCur,a.date);
+}
 function renderDiv(){
   if(!TL.hasAcc){ $("divBody").innerHTML='<p class="hint">Voeg je rekeningoverzicht toe; daarin staan de uitkeringen.</p>'; return; }
   const rows=state.acc.filter(a=>a.date<=sel&&(a.cat==="Dividend"||a.cat==="Dividendbelasting"));
   if(!rows.length){ $("divBody").innerHTML='<p class="hint">Tot en met '+fmtDate(sel)+" nog geen dividend ontvangen. Van je fondsen keert alleen de Vanguard S&amp;P 500 uit; de andere zijn accumulerend.</p>"; return; }
   const perF={}, perY={};
   rows.forEach(a=>{
-    const eur=a.mutCur==="EUR"?a.mut:(a.fx?a.mut/a.fx:a.mut/state.fx);
+    const eur=eurOf(a);
     const key=a.isin||"overig", y=a.date.slice(0,4);
     perF[key]=perF[key]||{bruto:0,tax:0};
     if(a.cat==="Dividend") perF[key].bruto+=eur; else perF[key].tax+=eur;
@@ -1576,7 +1614,7 @@ $("btnCsv").addEventListener("click",()=>{
 });
 $("btnReset").addEventListener("click",()=>{
   if(!confirm("Alle ingelezen data uit deze pagina wissen?")) return;
-  state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal"}; TL=null; sel=null;
+  state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{}}; TL=null; sel=null;
   $("app").classList.add("hidden"); $("empty").classList.remove("hidden");
   ["btnSave","btnCsv","btnReset"].forEach(id=>$(id).disabled=true);
 });
