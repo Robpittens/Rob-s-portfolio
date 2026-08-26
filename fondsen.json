@@ -1,36 +1,48 @@
 {
   "vanaf": "2024-01-01",
-  "_uitleg": "Per fonds: de ISIN uit je DeGiro-export en het symbool waaronder Yahoo Finance het fonds kent. Controleer het symbool door het te zoeken op finance.yahoo.com en de koers te vergelijken met je DeGiro-overzicht.",
+  "_uitleg": "Per fonds: ISIN uit je DeGiro-export en het Yahoo-symbool. 'sector' en 'land' zijn optioneel en vrij te kiezen; ze vullen de verdelingsdonut in de portefeuillepagina.",
   "fondsen": [
     {
       "isin": "IE00B3XXRP09",
       "naam": "Vanguard S&P 500 UCITS ETF (Amsterdam)",
-      "ticker": "VUSA.AS"
+      "ticker": "VUSA.AS",
+      "sector": "Aandelen VS",
+      "land": "Verenigde Staten"
     },
     {
       "isin": "IE00BM67HT60",
       "naam": "Xtrackers MSCI World Information Technology (Xetra)",
-      "ticker": "XDWT.DE"
+      "ticker": "XDWT.DE",
+      "sector": "Technologie",
+      "land": "Wereldwijd"
     },
     {
       "isin": "NL0012969182",
       "naam": "Adyen N.V. (Amsterdam)",
-      "ticker": "ADYEN.AS"
+      "ticker": "ADYEN.AS",
+      "sector": "Financiële diensten",
+      "land": "Nederland"
     },
     {
       "isin": "US0378331005",
       "naam": "Apple Inc. (Nasdaq, noteert in dollar)",
-      "ticker": "AAPL"
+      "ticker": "AAPL",
+      "sector": "Technologie",
+      "land": "Verenigde Staten"
     },
     {
       "isin": "IE00B53L3W79",
       "naam": "iShares Core EURO STOXX 50 (Amsterdam, verkocht)",
-      "ticker": "CSX5.AS"
+      "ticker": "CSX5.AS",
+      "sector": "Aandelen breed",
+      "land": "Eurozone"
     },
     {
       "isin": "IE00BGV5VN51",
       "naam": "Xtrackers Artificial Intelligence & Big Data (Xetra)",
-      "ticker": "XAIX.DE"
+      "ticker": "XAIX.DE",
+      "sector": "Technologie",
+      "land": "Wereldwijd"
     }
   ]
 }
