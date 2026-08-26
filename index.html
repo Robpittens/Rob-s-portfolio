@@ -110,6 +110,7 @@
     border:1px solid var(--line2);color:var(--muted);border-radius:4px;padding:1px 5px;margin-left:6px}
   .tag.exact{border-color:rgba(95,211,166,.5);color:var(--good)}
   .tag.est{border-color:rgba(240,194,103,.45);color:var(--sand)}
+  .tag.trail{border-color:rgba(135,176,188,.5);color:var(--muted)}
 
   /* ---------- prices editor ---------- */
   .prow{border-bottom:1px solid rgba(28,76,94,.5);padding:11px 0}
@@ -256,9 +257,10 @@
   </div>
 
   <footer>
-    Tussen twee bekende koersen rekent Peilschaal rechtlijnig door. Dagen met een echte koers krijgen het label
-    <span class="tag exact">koers</span>, dagen ertussenin <span class="tag est">geschat</span>. Bewaar je werk met
-    <b>Opslaan</b> en sleep dat .json-bestand later terug om verder te gaan.
+    Tussen twee bekende koersen rekent Peilschaal rechtlijnig door. Een dag met een echte koers krijgt
+    <span class="tag exact">koers</span>, een dag ertussenin <span class="tag est">schat</span>, en een dag
+    ná de laatst bekende koers <span class="tag trail">laatste</span> — geen schatting, maar de meest
+    recente stand. Bewaar je werk met <b>Opslaan</b> en sleep dat .json-bestand later terug om verder te gaan.
   </footer>
 </main>
 </div>
@@ -487,23 +489,27 @@ function anchorsFor(isin,txs,marks){
     .sort((a,b)=>a.date<b.date?-1:1);
 }
 function curve(anchors,days){
-  const n=days.length, out=new Float64Array(n), exact=new Uint8Array(n);
-  if(!anchors.length) return {p:out,exact:exact};
+  const n=days.length, out=new Float64Array(n),
+        exact=new Uint8Array(n), trail=new Uint8Array(n);
+  if(!anchors.length) return {p:out,exact:exact,trail:trail};
   let k=0;
   const at=anchors.map(a=>toTs(a.date));
-  const set=new Set(at);
+  const set=new Set(at), last=at[at.length-1];
   for(let i=0;i<n;i++){
     const t=toTs(days[i]);
     while(k<anchors.length-1 && at[k+1]<=t) k++;
     if(t<=at[0]) out[i]=anchors[0].price;
-    else if(t>=at[anchors.length-1]) out[i]=anchors[anchors.length-1].price;
+    else if(t>=last) out[i]=anchors[anchors.length-1].price;
     else{
       const t0=at[k],t1=at[k+1],p0=anchors[k].price,p1=anchors[k+1].price;
       out[i]=t1===t0?p1:p0+(p1-p0)*((t-t0)/(t1-t0));
     }
     exact[i]=set.has(t)?1:0;
+    // Ná de laatste bekende koers is dit geen schatting maar simpelweg
+    // de meest recente stand — dat verdient een ander label.
+    trail[i]=(!exact[i]&&t>last)?1:0;
   }
-  return {p:out,exact:exact};
+  return {p:out,exact:exact,trail:trail};
 }
 
 /* ===================== timeline ===================== */
@@ -562,18 +568,18 @@ function buildTimeline(state){
       else if(a.cat==="Overig") other+=eur;
     });
 
-    let inv=0, exactVal=0;
+    let inv=0, exactVal=0, trailVal=0;
     const pos=[];
     for(const is of isins){
       const h=hold[is]; if(h.qty<=0) continue;
-      const p=curves[is].p[i], ex=curves[is].exact[i];
-      const v=h.qty*p; inv+=v; if(ex) exactVal+=v;
-      pos.push({isin:is,name:h.name,qty:h.qty,price:p,exact:!!ex,value:v,
+      const p=curves[is].p[i], ex=curves[is].exact[i], tr=curves[is].trail[i];
+      const v=h.qty*p; inv+=v; if(ex) exactVal+=v; else if(tr) trailVal+=v;
+      pos.push({isin:is,name:h.name,qty:h.qty,price:p,exact:!!ex,trail:!!tr,value:v,
                 avg:h.qty>0?h.cost/h.qty:0,cost:h.cost});
     }
     let cash=0; for(const c in bal) cash+=(c==="EUR")?bal[c]:bal[c]*fx;
     rowsOut.push({date:d, inv:inv, cash:cash, total:inv+cash, netDep:netDep,
-      exactShare:inv>0?exactVal/inv:1, pos:pos,
+      exactShare:inv>0?exactVal/inv:1, trailShare:inv>0?trailVal/inv:0, pos:pos,
       div:div, tax:tax, fees:fees, rente:rente, other:other,
       cats:Object.assign({},catTot),
       realized:isins.reduce((s,is)=>s+hold[is].realized,0),
@@ -607,6 +613,13 @@ const fmtNum=(v,dec)=>v==null||!isFinite(v)?"—":
   new Intl.NumberFormat("nl-NL",{minimumFractionDigits:dec==null?2:dec,maximumFractionDigits:dec==null?2:dec}).format(v);
 const fmtPct=v=>v==null||!isFinite(v)?"—":(v>=0?"+":"")+new Intl.NumberFormat("nl-NL",{minimumFractionDigits:1,maximumFractionDigits:1}).format(v*100)+"%";
 const fmtDate=d=>{const p=d.split("-");return p[2].replace(/^0/,"")+" "+["jan","feb","mrt","apr","mei","jun","jul","aug","sep","okt","nov","dec"][+p[1]-1]+" "+p[0];};
+// "2026-08-26T13:42:07Z" -> "26 aug 2026, 15:42" in de tijdzone van de bezoeker
+const fmtStamp=s=>{
+  const d=new Date(s);
+  if(isNaN(d)) return fmtDate(String(s).slice(0,10));
+  const day=iso(d.getFullYear(),d.getMonth()+1,d.getDate());
+  return fmtDate(day)+", "+pad2(d.getHours())+":"+pad2(d.getMinutes());
+};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -696,10 +709,11 @@ function renderAll(){
   $("dateIn").value=sel;
   $("bigVal").textContent=fmtEur(r.total);
   const res=r.total-r.netDep, pct=r.netDep>0?res/r.netDep:null;
-  const q=r.exactShare;
+  const q=r.exactShare, tr=r.trailShare;
   const qTxt=r.inv<=0?"geen posities":
     q>=0.999?"volledig op echte koersen":
-    q<=0.001?"koersen geïnterpoleerd":
+    q+tr>=0.999?"laatst bekende koersen":
+    q<=0.001&&tr<=0.001?"koersen geïnterpoleerd":
     Math.round(q*100)+"% op echte koersen";
   $("valChips").innerHTML=
     '<span class="chip">beleggingen '+fmtEur(r.inv,0)+"</span>"+
@@ -732,7 +746,8 @@ function renderPos(r){
     const res=p.value-p.cost;
     h+='<tr><td><span class="nm">'+esc(p.name)+'</span><span class="isin">'+p.isin+'</span></td>'+
        "<td>"+fmtNum(p.qty,p.qty%1?4:0)+"</td>"+
-       "<td>"+fmtNum(p.price)+'<span class="tag '+(p.exact?"exact":"est")+'">'+(p.exact?"koers":"schat")+"</span></td>"+
+       "<td>"+fmtNum(p.price)+'<span class="tag '+(p.exact?"exact":p.trail?"trail":"est")+'">'+
+       (p.exact?"koers":p.trail?"laatste":"schat")+"</span></td>"+
        "<td>"+fmtNum(p.avg)+"</td><td>"+fmtEur(p.value)+"</td>"+
        '<td class="'+(res>=0?"up":"down")+'">'+fmtEur(res,0)+"</td>"+
        "<td>"+fmtNum(r.inv?p.value/r.inv*100:0,1)+"%</td></tr>";
@@ -876,7 +891,7 @@ async function fetchPrices(url,quiet){
     state.priceUrl=url;
     recompute(false);
     autoStatus(r.funds+" fondsen bijgewerkt · "+r.pts.toLocaleString("nl-NL")+" koersen"+
-      (r.updated?" · bestand van "+fmtDate(String(r.updated).slice(0,10)):"")+
+      (r.updated?" · koersen van "+fmtStamp(r.updated):"")+
       (r.unknown.length?" · "+r.unknown.length+" fonds niet in bezit":""));
   }catch(e){
     const raw=e.message||String(e);
