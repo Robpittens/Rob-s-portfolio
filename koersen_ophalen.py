@@ -330,7 +330,20 @@ def main():
                     "holdings": v.get("holdings")}
                 for k, v in (funds or {}).items()}
 
-    if prices_only(old.get("fondsen")) == prices_only(result):
+    # De dagelijkse wisselkoersen meegeven, zodat de pagina dollarbedragen
+    # met de koers van de juiste dag kan omrekenen in plaats van met een
+    # handmatig ingevuld getal.
+    koersen_per_valuta = {}
+    for cur, series in fx_cache.items():
+        if cur != "EUR" and series:
+            koersen_per_valuta[cur] = {d: round(v, 6) for d, v in series.items()}
+    if koersen_per_valuta:
+        log("Wisselkoersen meegegeven: %s" % ", ".join(
+            "%s (%d dagen, laatste %.4f)" % (c, len(v), v[max(v)])
+            for c, v in sorted(koersen_per_valuta.items())))
+
+    if prices_only(old.get("fondsen")) == prices_only(result) \
+            and (old.get("wisselkoersen") or {}) == koersen_per_valuta:
         log("Koersen ongewijzigd; koersen.json blijft zoals hij was.")
         return 0
 
@@ -339,6 +352,7 @@ def main():
                       .strftime("%Y-%m-%dT%H:%M:%SZ"),
         "valuta": "EUR",
         "bron": "Yahoo Finance",
+        "wisselkoersen": koersen_per_valuta,
         "fondsen": result,
     }
     with open(OUTPUT, "w", encoding="utf-8") as fh:
