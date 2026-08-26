@@ -110,19 +110,21 @@
     border:1px solid var(--line2);color:var(--muted);border-radius:4px;padding:1px 5px;margin-left:6px}
   .tag.exact{border-color:rgba(95,211,166,.5);color:var(--good)}
   /* ---------- effectenlijst ---------- */
-  .fund{display:grid;grid-template-columns:34px 1fr auto;gap:11px;align-items:center;
+  .fund{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:11px;align-items:center;
     padding:11px 8px;border-bottom:1px solid rgba(28,76,94,.5);cursor:pointer;
     border-radius:8px;transition:background .12s;width:100%;background:none;border-left:0;
     border-right:0;border-top:0;text-align:left;font-family:var(--sans);color:var(--ink)}
   .fund:hover{background:rgba(58,200,193,.07)}
   .fund:last-of-type{border-bottom:none}
+  .fund>span{min-width:0}
   .badge{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
     font-family:var(--mono);font-size:13px;font-weight:600;color:#07202B}
-  .fund .nm2{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-  .fund .sub2{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:3px}
-  .fund .rt{text-align:right;font-family:var(--mono);font-size:13px;white-space:nowrap}
+  .fund .nm2{display:block;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fund .sub2{display:block;font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:3px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fund .rt{display:block;text-align:right;font-family:var(--mono);font-size:13px;white-space:nowrap}
   .fund .rt small{display:block;font-size:11px;margin-top:3px}
-  .wbar{height:3px;border-radius:2px;background:rgba(28,76,94,.8);margin-top:6px;overflow:hidden}
+  .wbar{display:block;height:3px;border-radius:2px;background:rgba(28,76,94,.8);margin-top:6px;overflow:hidden}
   .wbar i{display:block;height:100%;background:var(--water)}
   .backbtn{background:none;border:0;color:var(--water);font-size:12.5px;padding:0 0 8px;cursor:pointer}
   .backbtn:hover{text-decoration:underline}
@@ -165,6 +167,39 @@
   .chip{border:1px solid var(--line);border-radius:99px;padding:3px 10px;background:rgba(7,32,43,.6)}
   footer{color:var(--dim);font-size:12px;margin-top:30px;border-top:1px solid var(--line);padding-top:14px}
   .hidden{display:none!important}
+
+  /* ---------- telefoon ---------- */
+  @media(max-width:620px){
+    html,body{overflow-x:hidden}
+    .wrap{padding:14px 12px 60px}
+    .card{padding:13px 12px;margin-bottom:12px}
+    header.top{gap:10px;padding-bottom:12px;margin-bottom:16px}
+    h1{font-size:18px}
+    .tagline{font-size:12px}
+    .topbtns{width:100%;gap:6px}
+    .topbtns .btn{padding:7px 10px;font-size:12px;flex:1 1 auto}
+    .readout{padding:14px 14px 12px;gap:14px}
+    .big{font-size:clamp(28px,9vw,38px)}
+    /* Vier cijfers naast elkaar wordt onleesbaar; twee bij twee leest prettiger. */
+    .kpis{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;width:100%}
+    .kpi .v{font-size:15px}
+    .chips{gap:6px}
+    .chip{padding:2px 8px}
+    .ranges{gap:5px}
+    .ranges button{padding:4px 9px;font-size:11.5px}
+    .fund{grid-template-columns:28px minmax(0,1fr) auto;gap:9px;padding:10px 2px}
+    .badge{width:28px;height:28px;border-radius:8px;font-size:11px}
+    .fund .nm2{font-size:12.5px}
+    .fund .rt{font-size:12.5px}
+    .fund .rt small{font-size:10.5px}
+    .donutwrap{gap:12px;justify-content:center}
+    .donutwrap>div{min-width:0!important}
+    .kv{font-size:12.5px}
+    table{font-size:12px}
+    td,th{font-size:11.5px}
+    .prow input[type="number"]{width:84px}
+    .prow input[type="date"]{width:124px}
+  }
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -1219,7 +1254,7 @@ function renderAlloc(r){
     g.length+" groepen</text>"+
     '<text x="72" y="82" text-anchor="middle" fill="#EAF4F5" font-size="12" font-family="ui-monospace,monospace">'+
     fmtEur(tot,0)+"</text></svg>"+
-    '<div style="flex:1;min-width:230px"><div class="legend2">'+
+    '<div style="flex:1 1 200px;min-width:0"><div class="legend2">'+
     g.map((x,i)=>'<div class="li"><span style="background:'+colorFor(x.k,i)+'"></span>'+
       "<span>"+esc(x.k)+"</span><b>"+fmtNum(x.v/tot*100,1)+"%</b></div>").join("")+
     "</div></div></div>";
