@@ -100,7 +100,7 @@ def daily_series(symbol, start_date):
         if not series:
             err = RuntimeError("geen koersen in antwoord voor %r" % symbol)
             continue
-        return series, currency
+        return series, currency, meta, divisor
     raise err
 
 
@@ -108,7 +108,7 @@ def fx_series(currency, start_date):
     """Wisselkoers van `currency` naar EUR per dag."""
     if currency == "EUR":
         return {}
-    series, cur = daily_series("%sEUR=X" % currency, start_date)
+    series, cur, _meta, _div = daily_series("%sEUR=X" % currency, start_date)
     if cur not in ("EUR", currency):
         log("   let op: wisselkoers %sEUR=X noteert in %s" % (currency, cur))
     return series
@@ -165,17 +165,33 @@ def main():
             continue
         log("%s  %s (%s)" % (isin, name, symbol))
         try:
-            series, currency = daily_series(symbol, start)
+            series, currency, meta, divisor = daily_series(symbol, start)
+            # Tijdens beurstijd levert Yahoo de koers van dít moment mee.
+            # Die zetten we op de dag van vandaag, zodat de portefeuille
+            # niet op de slotkoers van gisteren blijft staan.
+            live_stamp = None
+            price_now = meta.get("regularMarketPrice")
+            time_now = meta.get("regularMarketTime")
+            if price_now and time_now:
+                day_now = datetime.datetime.fromtimestamp(
+                    int(time_now), datetime.timezone.utc)
+                series[day_now.strftime("%Y-%m-%d")] = round(
+                    float(price_now) / divisor, 6)
+                live_stamp = day_now.strftime("%Y-%m-%dT%H:%M:%SZ")
             if currency not in fx_cache:
                 fx_cache[currency] = fx_series(currency, start)
             eur = convert(series, fx_cache[currency])
             last_day = max(eur)
-            log("   %d dagen, laatste %s = EUR %.4f (bron: %s)" % (
-                len(eur), last_day, eur[last_day], currency))
+            log("   %d dagen, laatste %s = EUR %.4f (bron: %s%s)" % (
+                len(eur), last_day, eur[last_day], currency,
+                ", live" if live_stamp else ""))
             merged = dict((old.get("fondsen", {}).get(isin) or {}).get("koersen") or {})
             merged.update(eur)
-            result[isin] = {"ticker": symbol, "naam": name,
-                            "brutovaluta": currency, "koersen": merged}
+            entry = {"ticker": symbol, "naam": name,
+                     "brutovaluta": currency, "koersen": merged}
+            if live_stamp:
+                entry["koers_tijd"] = live_stamp
+            result[isin] = entry
         except Exception as exc:
             log("   MISLUKT: %s" % exc)
             failed.append("%s (%s)" % (name, symbol))
@@ -187,6 +203,17 @@ def main():
     if not result:
         log("Niets opgehaald en niets bewaard: koersen.json blijft ongewijzigd.")
         return 1
+
+    # Bij een run elk half uur zou een nieuwe tijdstempel alleen al een
+    # commit uitlokken. Daarom alleen wegschrijven als de koersen echt
+    # veranderd zijn.
+    def prices_only(funds):
+        return {k: {"koersen": v.get("koersen"), "ticker": v.get("ticker")}
+                for k, v in (funds or {}).items()}
+
+    if prices_only(old.get("fondsen")) == prices_only(result):
+        log("Koersen ongewijzigd; koersen.json blijft zoals hij was.")
+        return 0
 
     payload = {
         "bijgewerkt": datetime.datetime.now(datetime.timezone.utc)
