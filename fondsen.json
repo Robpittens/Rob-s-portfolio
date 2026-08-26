@@ -43,6 +43,12 @@
       "ticker": "XAIX.DE",
       "sector": "Technologie",
       "land": "Wereldwijd"
+    },
+    {
+      "isin": "BENCHMARK-WERELD",
+      "naam": "iShares Core MSCI World",
+      "ticker": "IWDA.AS",
+      "benchmark": true
     }
   ]
 }
