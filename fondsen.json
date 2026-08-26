@@ -26,6 +26,11 @@
       "isin": "IE00B53L3W79",
       "naam": "iShares Core EURO STOXX 50 (Amsterdam, verkocht)",
       "ticker": "CSX5.AS"
-    }
+    },
+    {
+      "isin": "IE00BGV5VN51",
+      "naam": "Xtrackers Artificial Intelligence & Big Data (Xetra)",
+      "ticker": "XAIX.DE"
+    },
   ]
 }
