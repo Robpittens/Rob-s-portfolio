@@ -189,6 +189,11 @@ def main():
             merged.update(eur)
             entry = {"ticker": symbol, "naam": name,
                      "brutovaluta": currency, "koersen": merged}
+            # Sector en land staan niet in de DeGiro-export; als je ze in
+            # fondsen.json invult, geeft de robot ze door aan de pagina.
+            for extra in ("sector", "land"):
+                if fund.get(extra):
+                    entry[extra] = fund[extra]
             if live_stamp:
                 entry["koers_tijd"] = live_stamp
             result[isin] = entry
@@ -208,7 +213,8 @@ def main():
     # commit uitlokken. Daarom alleen wegschrijven als de koersen echt
     # veranderd zijn.
     def prices_only(funds):
-        return {k: {"koersen": v.get("koersen"), "ticker": v.get("ticker")}
+        return {k: {"koersen": v.get("koersen"), "ticker": v.get("ticker"),
+                    "sector": v.get("sector"), "land": v.get("land")}
                 for k, v in (funds or {}).items()}
 
     if prices_only(old.get("fondsen")) == prices_only(result):
