@@ -2,7 +2,7 @@ name: Koersen bijwerken
 
 on:
   schedule:
-    - cron: "*/30 7-22 * * 1-5"
+    - cron: "13,43 7-22 * * 1-5"
   workflow_dispatch: {}
 
 permissions:
