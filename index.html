@@ -266,6 +266,14 @@
 
   <div class="card">
     <div class="ranges" id="ranges"></div>
+    <div class="ctl" style="margin:2px 0 12px">
+      <label class="meta" style="font-family:var(--mono);font-size:11px;color:var(--dim)">van</label>
+      <input type="date" id="vanIn">
+      <label class="meta" style="font-family:var(--mono);font-size:11px;color:var(--dim)">t/m</label>
+      <input type="date" id="totIn">
+      <button class="mini" id="eigenGo">Toepassen</button>
+      <button class="mini hidden" id="eigenOff">Eigen periode wissen</button>
+    </div>
     <div class="chartwrap" id="chartwrap" tabindex="0" role="slider" aria-label="Sleep om door de tijd te bewegen">
       <svg id="chart" viewBox="0 0 900 380" preserveAspectRatio="xMidYMid meet"></svg>
       <div class="tip" id="tip"></div>
@@ -751,7 +759,7 @@ function xirr(flows,guess){
 //ENGINE>>
 
 /* ===================== state + rendering ===================== */
-var state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{},bench:null};
+var state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{},bench:null,van:null,tot:null};
 var TL=null, sel=null, range="all", pinned=null;
 
 const fmtEur=(v,dec)=>v==null||!isFinite(v)?"—":
@@ -789,7 +797,7 @@ async function handleFiles(list){
           if(!r.funds) throw new Error("geen enkel fonds uit dit bestand zit in jouw portefeuille");
           autoStatus(r.funds+" fondsen bijgewerkt uit "+f.name+" · "+r.pts.toLocaleString("nl-NL")+" koersen");
         } else {
-          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{},bench:null},o);
+          state=Object.assign({txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{},bench:null,van:null,tot:null},o);
           state.focus=null; state.meta=state.meta||{};
         }
         continue;
@@ -868,6 +876,11 @@ function recompute(resetSel){
   $("app").classList.remove("hidden");
   ["btnSave","btnCsv","btnReset"].forEach(id=>$(id).disabled=false);
   $("dateIn").min=TL.days[0]; $("dateIn").max=TL.days[TL.days.length-1];
+  ["vanIn","totIn"].forEach(id=>{
+    $(id).min=TL.days[0]; $(id).max=TL.days[TL.days.length-1];
+  });
+  if(!$("vanIn").value) $("vanIn").value=state.van||TL.days[Math.max(0,TL.days.length-31)];
+  if(!$("totIn").value) $("totIn").value=state.tot||TL.days[TL.days.length-1];
   $("fxIn").value=state.fx;
   // Vertellen of de wisselkoers automatisch binnenkomt of handmatig is.
   const ser=(state.fxSeries||{}).USD;
@@ -1471,6 +1484,13 @@ function renderDiv(){
 function visibleSlice(){
   const rows=TL.rows, endTs=toTs(rows[rows.length-1].date);
   let startTs;
+  // Eigen venster: van/t/m die je zelf hebt ingevuld.
+  if(range==="eigen"&&state.van&&state.tot){
+    const idx=d=>{ let i=0; while(i<rows.length-1&&rows[i].date<d) i++; return i; };
+    let a=idx(state.van), b=idx(state.tot);
+    if(a>b){ const t=a; a=b; b=t; }
+    return {from:a,to:b};
+  }
   if(range==="all") return {from:0,to:rows.length-1};
   if(range==="ytd") startTs=toTs(rows[rows.length-1].date.slice(0,4)+"-01-01");
   else if(range==="1d") startTs=endTs-DAY;
@@ -1485,14 +1505,43 @@ function visibleSlice(){
 function renderRanges(){
   const opts=[["1d","1D"],["1w","1W"],["1m","1M"],["3m","3M"],["6m","6M"],["ytd","YTD"],
               ["1j","1J"],["3j","3J"],["all","Alles"]];
-  $("ranges").innerHTML=opts.map(o=>'<button data-r="'+o[0]+'" aria-pressed="'+(range===o[0])+'">'+o[1]+"</button>").join("");
+  $("ranges").innerHTML=opts.map(o=>'<button data-r="'+o[0]+'" aria-pressed="'+(range===o[0])+'">'+o[1]+"</button>").join("")+
+    (range==="eigen"?'<button aria-pressed="true" disabled>eigen periode</button>':"");
 }
 $("ranges").addEventListener("click",e=>{
-  const b=e.target.closest("button"); if(!b) return;
-  range=b.dataset.r; renderRanges();
+  const b=e.target.closest("button"); if(!b||!b.dataset.r) return;
+  range=b.dataset.r; state.van=null; state.tot=null;
+  $("eigenOff").classList.add("hidden");
+  renderRanges();
   const s=visibleSlice();
   if(TL.index.get(sel)<s.from){ sel=TL.days[s.from]; }
   renderAll();
+});
+
+// Eigen periode: van/t/m zelf kiezen in plaats van een vaste knop.
+function pasEigenPeriodeToe(){
+  const a=parseDate($("vanIn").value), b=parseDate($("totIn").value);
+  if(!a||!b){ showErr("Vul zowel een begin- als een einddatum in."); return; }
+  const eerste=TL.days[0], laatste=TL.days[TL.days.length-1];
+  let van=a<eerste?eerste:a, tot=b>laatste?laatste:b;
+  if(van>tot){ const t=van; van=tot; tot=t; }
+  if(van===tot){ showErr("Kies een begin- en einddatum die minstens één dag verschillen."); return; }
+  showErr("");
+  state.van=van; state.tot=tot; range="eigen";
+  $("vanIn").value=van; $("totIn").value=tot;
+  $("eigenOff").classList.remove("hidden");
+  sel=tot;                      // de stand staat op het einde van je venster
+  state.mode="periode";         // en de cijfers gaan meteen over die periode
+  renderRanges(); renderAll();
+}
+$("eigenGo").addEventListener("click",pasEigenPeriodeToe);
+["vanIn","totIn"].forEach(id=>$(id).addEventListener("keydown",e=>{
+  if(e.key==="Enter") pasEigenPeriodeToe(); }));
+$("eigenOff").addEventListener("click",()=>{
+  state.van=null; state.tot=null; range="all"; state.mode="totaal";
+  $("eigenOff").classList.add("hidden");
+  sel=TL.days[TL.days.length-1];
+  renderRanges(); renderAll();
 });
 
 let chartGeo=null;
@@ -1613,7 +1662,13 @@ cw.addEventListener("keydown",e=>{
 });
 $("dateIn").addEventListener("change",e=>{
   const d=parseDate(e.target.value);
-  if(d&&TL.index.has(d)){ sel=d; renderAll(); }
+  if(d&&TL.index.has(d)){
+    if(range==="eigen"&&state.van&&(d<state.van||d>state.tot)){
+      showErr("Die datum valt buiten je eigen periode ("+fmtDate(state.van)+" t/m "+fmtDate(state.tot)+").");
+      e.target.value=sel; return;
+    }
+    showErr(""); sel=d; renderAll();
+  }
   else{ showErr("Die datum valt buiten je historie ("+fmtDate(TL.days[0])+" t/m "+fmtDate(TL.days[TL.days.length-1])+")."); e.target.value=sel; }
 });
 $("btnToday").addEventListener("click",()=>{ sel=TL.days[TL.days.length-1]; renderAll(); });
@@ -1656,7 +1711,7 @@ $("btnCsv").addEventListener("click",()=>{
 });
 $("btnReset").addEventListener("click",()=>{
   if(!confirm("Alle ingelezen data uit deze pagina wissen?")) return;
-  state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{},bench:null}; TL=null; sel=null;
+  state={txs:[],acc:[],marks:{},fx:1.16,files:[],meta:{},focus:null,allocTab:"fonds",mode:"totaal",fxSeries:{},bench:null,van:null,tot:null}; TL=null; sel=null;
   $("app").classList.add("hidden"); $("empty").classList.remove("hidden");
   ["btnSave","btnCsv","btnReset"].forEach(id=>$(id).disabled=true);
 });
